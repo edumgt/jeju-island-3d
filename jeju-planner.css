@@ -133,6 +133,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .canvas-container canvas { display: block; width: 100%; height: 100%; }
 .viewer.is-picking .canvas-container canvas { cursor: crosshair; }
 .marker-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+.road-legend { position: absolute; z-index: 4; left: 31px; bottom: 31px; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid rgba(218, 199, 151, .8); border-radius: 6px; background: rgba(255, 252, 244, .9); color: #82663a; font-size: 9px; font-weight: 800; pointer-events: none; }
+.road-legend span { display: block; width: 16px; height: 3px; border-radius: 4px; background: #e29a45; }
 .map-label { position: absolute; display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 5px 9px 5px 7px; color: #223b50; background: rgba(255,255,255,.96); border: 1px solid rgba(211,224,232,.9); border-radius: 7px; box-shadow: 0 4px 12px rgba(33, 70, 93, .12); white-space: nowrap; font-size: 10px; font-weight: 800; transform: translate(-50%, calc(-100% - 11px)); pointer-events: auto; transition: color .15s, border-color .15s; }
 .map-label::before { content: ""; width: 6px; height: 6px; background: #1769c1; border-radius: 50%; }
 .map-label.is-custom::before { background: #e47d52; }
@@ -155,6 +157,12 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .tool-button { display: grid; place-items: center; width: 47px; height: 48px; border: 0; border-radius: 8px; color: #8997a2; background: transparent; }
 .tool-button:hover, .tool-button.is-active { color: #1769c1; background: #edf5ff; }
 .tool-icon { font-size: 23px; line-height: 1; }
+.road-tool-icon { color: #df8740; font-weight: 900; letter-spacing: -.18em; transform: scaleX(1.25); }
+.drone-hud { position: absolute; z-index: 5; top: 28px; left: 50%; display: flex; flex-direction: column; gap: 4px; transform: translateX(-50%); padding: 9px 14px; border: 1px solid rgba(173, 220, 243, .8); border-radius: 8px; background: rgba(11, 36, 57, .88); color: #fff; box-shadow: 0 7px 22px rgba(18, 44, 64, .18); pointer-events: none; text-align: center; }
+.drone-hud strong { color: #78d6ff; font-size: 10px; letter-spacing: .14em; }
+.drone-hud b { margin-left: 8px; color: #fff; font-size: 9px; letter-spacing: 0; }
+.drone-hud span { color: #d8eef8; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.viewer.is-drone .viewer-tip { display: none; }
 .tool-button small { font-size: 9px; font-weight: 800; }
 .tool-divider { height: 1px; margin: 3px 6px; background: #e6eaee; }
 .selection-card { position: absolute; bottom: 127px; left: 30px; z-index: 5; width: 216px; padding: 16px 17px; background: white; border: 1px solid #e0e9ee; border-radius: 11px; box-shadow: 0 9px 30px rgba(39, 72, 93, .12); }
@@ -208,6 +216,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   .pick-instruction { top: 85px; font-size: 10px; padding: 9px 10px; }
   .viewer-title strong { font-size: 23px; }
   .view-tools { right: 12px; top: 41%; padding: 5px; }
+  .drone-hud { top: 76px; padding: 7px 10px; }
+  .drone-hud span { font-size: 9px; }
   .tool-button { width: 40px; height: 43px; }
   .bottom-toolbar { left: 10px; right: 10px; bottom: 25px; gap: 4px; min-height: 54px; padding: 6px; }
   .bottom-tools button { width: 31px; height: 34px; font-size: 19px; }
@@ -216,6 +226,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   .bottom-save { margin-left: auto; width: 106px; height: 38px; gap: 4px; padding: 0 9px; font-size: 10px; }
   .selection-card { left: 13px; bottom: 92px; width: 188px; }
   .map-credit { left: 13px; bottom: 6px; font-size: 8px; }
+  .road-legend { left: 13px; bottom: 27px; }
   .toast { bottom: 90px; }
 }
 

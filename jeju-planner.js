@@ -6,7 +6,10 @@
   const MAP_WIDTH = 103;
   const MAP_DEPTH = 57;
   const HEIGHT_FACTOR = 0.008;
+  const DRONE_ALTITUDE_METERS = 100;
   const STORAGE_KEY = 'jeju-studio-plan-v1';
+  const ROADS_CACHE_KEY = 'jeju-studio-osm-roads-v1';
+  const ROADS_CACHE_AGE = 7 * 24 * 60 * 60 * 1000;
   const PRESETS = [
     { id: 'hallasan', name: '한라산', category: '화산 지형', icon: '⛰', lat: 33.3617, lng: 126.5292 },
     { id: 'seongsan', name: '성산일출봉', category: '자연 명소', icon: '☀', lat: 33.4581, lng: 126.9426 },
@@ -21,7 +24,8 @@
     mapStyle: 'natural',
     heightScale: 100,
     showLabels: true,
-    showOcean: true
+    showOcean: true,
+    showRoads: true
   });
 
   function cleanState(raw) {
@@ -49,7 +53,8 @@
       mapStyle: raw.mapStyle === 'elevation' ? 'elevation' : 'natural',
       heightScale: Math.min(180, Math.max(40, Number(raw.heightScale) || 100)),
       showLabels: raw.showLabels !== false,
-      showOcean: raw.showOcean !== false
+      showOcean: raw.showOcean !== false,
+      showRoads: raw.showRoads !== false
     };
   }
 
@@ -66,13 +71,25 @@
   const undoStack = [];
   const redoStack = [];
   const outline = window.JEJU_OUTLINE;
-  let scene, camera, renderer, controls, terrain, ocean, shoreline, textures, heightData;
+  let scene, camera, renderer, controls, terrain, ocean, shoreline, roadGroup, textures, heightData;
   let renderedHeightScale, renderedMapStyle;
   let markerObjects = [];
   let markerHits = [];
   let viewMode = 'perspective';
   let pickingLocation = false;
   let toastTimer;
+  let droneMode = false;
+  let droneYaw = 0;
+  let dronePitch = -0.16;
+  let droneTargetSpeed = 0;
+  let droneBank = 0;
+  let lastFrameTime = 0;
+  const droneKeys = new Set();
+  const droneVelocity = new THREE.Vector3();
+  let roadWays = Array.isArray(window.JEJU_ROADS) ? window.JEJU_ROADS.map((road) => ({
+    tags: { highway: road.type, name: road.name },
+    geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
+  })) : [];
   const viewer = $('#viewer');
   const canvasContainer = $('#canvas-container');
   const markerLayer = $('#marker-layer');
@@ -258,6 +275,9 @@
     $('#height-value').textContent = `${state.heightScale}%`;
     $('#toggle-labels').checked = state.showLabels;
     $('#toggle-ocean').checked = state.showOcean;
+    $('#road-toggle').classList.toggle('is-active', state.showRoads);
+    $('#road-toggle').setAttribute('aria-pressed', String(state.showRoads));
+    $('#road-toggle').setAttribute('aria-label', `주요 도로 안내 ${state.showRoads ? '끄기' : '켜기'}`);
     markerLayer.style.display = state.showLabels && !pickingLocation ? '' : 'none';
     if (terrain) {
       if (renderedMapStyle !== state.mapStyle) {
@@ -266,6 +286,8 @@
         renderedMapStyle = state.mapStyle;
       }
       ocean.visible = state.showOcean;
+      if (roadGroup) roadGroup.visible = state.showRoads;
+      $('#road-legend').hidden = !state.showRoads || !roadWays.length;
       if (renderedHeightScale !== state.heightScale) updateTerrainHeight();
       syncMarkers();
     }
@@ -316,6 +338,7 @@
 
   function setView(mode) {
     if (!camera || !controls) return;
+    if (droneMode) setDroneMode(false);
     viewMode = mode;
     const aspect = Math.max(0.4, viewer.clientWidth / Math.max(1, viewer.clientHeight));
     const distance = Math.max(180, 63 / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect));
@@ -337,6 +360,79 @@
     offset.setLength(distance);
     camera.position.copy(controls.target).add(offset);
     controls.update();
+  }
+
+  function updateDroneCamera() {
+    const horizontal = Math.cos(dronePitch);
+    const direction = new THREE.Vector3(
+      Math.sin(droneYaw) * horizontal,
+      Math.sin(dronePitch),
+      Math.cos(droneYaw) * horizontal
+    );
+    camera.up.set(0, 1, 0);
+    camera.lookAt(camera.position.clone().add(direction));
+  }
+
+  function droneAltitudeAt(position) {
+    const lat = BOUNDS.north - (position.z / MAP_DEPTH + 0.5) * (BOUNDS.north - BOUNDS.south);
+    const lng = BOUNDS.west + (position.x / MAP_WIDTH + 0.5) * (BOUNDS.east - BOUNDS.west);
+    const altitude = DRONE_ALTITUDE_METERS * HEIGHT_FACTOR * state.heightScale / 100;
+    return surfaceHeight(lat, lng) + altitude;
+  }
+
+  function setDroneMode(enabled) {
+    if (!camera || !controls || !terrain) {
+      showToast('지도가 준비된 뒤 드론 보기를 사용할 수 있어요.');
+      return;
+    }
+    droneMode = enabled;
+    droneKeys.clear();
+    viewer.classList.toggle('is-drone', enabled);
+    $('#drone-hud').hidden = !enabled;
+    $('#drone-toggle').classList.toggle('is-active', enabled);
+    $('#drone-toggle').setAttribute('aria-pressed', String(enabled));
+    $('#drone-toggle').setAttribute('aria-label', `드론 비행 보기 ${enabled ? '끄기' : '켜기'}`);
+    if (enabled) {
+      controls.enabled = false;
+      viewMode = 'drone';
+      camera.position.set(-18, 20, 24);
+      const towardCenter = new THREE.Vector3(0, 0, 0).sub(camera.position);
+      droneYaw = Math.atan2(towardCenter.x, towardCenter.z);
+      dronePitch = -0.16;
+      droneTargetSpeed = 0;
+      droneBank = 0;
+      camera.position.y = droneAltitudeAt(camera.position);
+      droneVelocity.set(0, 0, 0);
+      updateDroneCamera();
+      showToast('방향키로 천천히 제주도를 둘러보세요. 고도는 지형 위 100m로 유지됩니다.');
+    } else {
+      droneTargetSpeed = 0;
+      droneVelocity.set(0, 0, 0);
+      controls.enabled = true;
+      setView('perspective');
+      showToast('드론 비행을 종료했어요.');
+    }
+  }
+
+  function updateDroneFlight(delta) {
+    if (!droneMode) return;
+    const turn = (droneKeys.has('ArrowRight') ? 1 : 0) - (droneKeys.has('ArrowLeft') ? 1 : 0);
+    droneYaw -= turn * delta * 0.7;
+    const throttle = (droneKeys.has('ArrowUp') ? 1 : 0) - (droneKeys.has('ArrowDown') ? 1 : 0);
+    droneTargetSpeed = throttle * 1.15;
+    const desiredVelocity = new THREE.Vector3(Math.sin(droneYaw) * droneTargetSpeed, 0, Math.cos(droneYaw) * droneTargetSpeed);
+    droneVelocity.lerp(desiredVelocity, 1 - Math.exp(-delta * 2.7));
+    camera.position.addScaledVector(droneVelocity, delta);
+    const boundedX = THREE.MathUtils.clamp(camera.position.x, -MAP_WIDTH * 0.68, MAP_WIDTH * 0.68);
+    const boundedZ = THREE.MathUtils.clamp(camera.position.z, -MAP_DEPTH * 0.68, MAP_DEPTH * 0.68);
+    if (boundedX !== camera.position.x || boundedZ !== camera.position.z) droneTargetSpeed = 0;
+    camera.position.x = boundedX;
+    camera.position.z = boundedZ;
+    camera.position.y = droneAltitudeAt(camera.position);
+    updateDroneCamera();
+    droneBank += (-turn * 0.14 - droneBank) * (1 - Math.exp(-delta * 5));
+    camera.rotation.z = droneBank;
+    $('#drone-speed').textContent = `${DRONE_ALTITUDE_METERS}m`;
   }
 
   function initUI() {
@@ -408,6 +504,16 @@
     });
     $('#toggle-labels').addEventListener('change', (event) => commit(() => { state.showLabels = event.target.checked; }));
     $('#toggle-ocean').addEventListener('change', (event) => commit(() => { state.showOcean = event.target.checked; }));
+    $('#road-toggle').addEventListener('click', () => commit(() => { state.showRoads = !state.showRoads; }));
+    $('#drone-toggle').addEventListener('click', () => setDroneMode(!droneMode));
+    window.addEventListener('keydown', (event) => {
+      if (!droneMode) return;
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) return;
+      event.preventDefault();
+      droneKeys.add(event.code);
+    });
+    window.addEventListener('keyup', (event) => droneKeys.delete(event.code));
+    window.addEventListener('blur', () => droneKeys.clear());
     $('#undo').addEventListener('click', undo);
     $('#redo').addEventListener('click', redo);
     $('#close-selection').addEventListener('click', () => selectMarker(null));
@@ -560,6 +666,122 @@
     terrain.geometry.computeVertexNormals();
     terrain.geometry.computeBoundingSphere();
     renderedHeightScale = state.heightScale;
+    if (roadWays.length) buildRoads();
+  }
+
+  function disposeObject(object) {
+    object.traverse((item) => {
+      if (item.geometry) item.geometry.dispose();
+      if (item.material) item.material.dispose();
+    });
+  }
+
+  function roadColor(type) {
+    if (type === 'motorway' || type === 'trunk') return 0xf05a35;
+    if (type === 'primary') return 0xffc928;
+    return 0xfff1b8;
+  }
+
+  function createRoadRibbon(points, width, color, offset) {
+    const vertices = [];
+    const indices = [];
+    for (let index = 0; index < points.length - 1; index++) {
+      const start = points[index];
+      const end = points[index + 1];
+      const length = Math.hypot(end.x - start.x, end.z - start.z);
+      if (length < 0.0001) continue;
+      const offsetX = -(end.z - start.z) / length * width;
+      const offsetZ = (end.x - start.x) / length * width;
+      const vertex = vertices.length / 3;
+      vertices.push(
+        start.x + offsetX, start.y + offset, start.z + offsetZ,
+        start.x - offsetX, start.y + offset, start.z - offsetZ,
+        end.x + offsetX, end.y + offset, end.z + offsetZ,
+        end.x - offsetX, end.y + offset, end.z - offsetZ
+      );
+      indices.push(vertex, vertex + 1, vertex + 2, vertex + 1, vertex + 3, vertex + 2);
+    }
+    if (!vertices.length) return null;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.98,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.renderOrder = 2;
+    return mesh;
+  }
+
+  function buildRoads() {
+    if (!scene || !heightData) return;
+    if (roadGroup) {
+      scene.remove(roadGroup);
+      disposeObject(roadGroup);
+    }
+    roadGroup = new THREE.Group();
+    roadGroup.name = 'OSM major roads';
+    for (const way of roadWays) {
+      if (!Array.isArray(way.geometry) || way.geometry.length < 2) continue;
+      const points = way.geometry.map((point) => {
+        const { x, z } = worldPosition(point.lat, point.lon);
+        return new THREE.Vector3(x, surfaceHeight(point.lat, point.lon) + 0.48, z);
+      });
+      const roadType = way.tags && way.tags.highway;
+      const width = roadType === 'motorway' || roadType === 'trunk' ? 0.56 : roadType === 'primary' ? 0.46 : 0.36;
+      const outline = createRoadRibbon(points, width + 0.13, 0x6f4a27, 0);
+      const road = createRoadRibbon(points, width, roadColor(roadType), 0.012);
+      if (outline) roadGroup.add(outline);
+      if (road) roadGroup.add(road);
+    }
+    roadGroup.visible = state.showRoads;
+    scene.add(roadGroup);
+  }
+
+  function readCachedRoads() {
+    try {
+      const cached = JSON.parse(localStorage.getItem(ROADS_CACHE_KEY));
+      if (cached && Date.now() - cached.savedAt < ROADS_CACHE_AGE && Array.isArray(cached.ways)) return cached.ways;
+    } catch (_) { /* Cache is optional. */ }
+    return null;
+  }
+
+  async function loadRoads() {
+    const cached = readCachedRoads();
+    if (cached) {
+      roadWays = cached;
+      buildRoads();
+      renderState();
+      return;
+    }
+    const query = `[out:json][timeout:25];way[highway~"^(motorway|trunk|primary|secondary)$"](${BOUNDS.south},${BOUNDS.west},${BOUNDS.north},${BOUNDS.east});out geom;`;
+    const endpoints = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: `data=${encodeURIComponent(query)}`
+        });
+        if (!response.ok) throw new Error(`도로 자료 요청 실패 (${response.status})`);
+        const data = await response.json();
+        roadWays = (data.elements || []).filter((way) => way.type === 'way' && way.geometry && way.geometry.length > 1);
+        try {
+          localStorage.setItem(ROADS_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), ways: roadWays }));
+        } catch (_) { /* The map still works when browser storage is unavailable. */ }
+        buildRoads();
+        renderState();
+        return;
+      } catch (error) {
+        console.warn('OSM 도로 자료를 불러오지 못했습니다.', error);
+      }
+    }
+    showToast('도로 자료를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.');
   }
 
   function syncMarkers() {
@@ -696,6 +918,9 @@
     syncMarkers();
     setView('perspective');
     $('#loading').hidden = true;
+    if (roadWays.length) buildRoads();
+    renderState();
+    loadRoads();
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -735,9 +960,12 @@
     });
     window.addEventListener('resize', resize);
     if ('ResizeObserver' in window) new ResizeObserver(resize).observe(viewer);
-    const animate = () => {
+    const animate = (time) => {
       requestAnimationFrame(animate);
-      controls.update();
+      const delta = Math.min(0.05, (time - lastFrameTime) / 1000 || 0);
+      lastFrameTime = time;
+      updateDroneFlight(delta);
+      if (!droneMode) controls.update();
       updateLabels();
       renderer.render(scene, camera);
     };

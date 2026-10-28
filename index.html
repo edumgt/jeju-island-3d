@@ -9,6 +9,7 @@
   <script defer src="vendor/OrbitControls.js"></script>
   <script defer src="assets/jeju-outline.js"></script>
   <script defer src="assets/jeju-textures.js"></script>
+  <script defer src="assets/jeju-roads.js"></script>
   <script defer src="jeju-planner.js"></script>
 </head>
 <body>
@@ -96,6 +97,7 @@
       <section id="viewer" class="viewer" aria-label="제주도 3D 지도">
         <div id="canvas-container" class="canvas-container"></div>
         <div id="marker-layer" class="marker-layer"></div>
+        <div id="road-legend" class="road-legend" hidden><span></span> 주요 도로 · OpenStreetMap</div>
         <div id="loading" class="loading" role="status"><span class="loading-spinner"></span><strong>제주도를 불러오는 중</strong><small>실제 해안선과 지형을 준비하고 있어요.</small></div>
 
         <div class="viewer-title"><span class="viewer-kicker">INTERACTIVE 3D MAP <span class="live-dot"></span> LIVE</span><strong>Jeju Island</strong><span>대한민국 · 북위 33.38°</span></div>
@@ -107,7 +109,12 @@
           <button type="button" data-action="top" class="tool-button" aria-label="위에서 보기" title="위에서 보기"><span class="tool-icon">▣</span><small>위에서</small></button>
           <div class="tool-divider"></div>
           <button type="button" data-action="focus" class="tool-button" aria-label="지도 중심 맞추기" title="지도 중심 맞추기"><span class="tool-icon">⌖</span><small>중심</small></button>
+          <div class="tool-divider"></div>
+          <button id="road-toggle" type="button" class="tool-button is-active" aria-label="주요 도로 안내 끄기" aria-pressed="true" title="주요 도로 안내"><span class="tool-icon road-tool-icon">━</span><small>도로</small></button>
+          <button id="drone-toggle" type="button" class="tool-button" aria-label="드론 비행 보기 켜기" aria-pressed="false" title="드론 비행 보기"><span class="tool-icon">◉</span><small>드론</small></button>
         </div>
+
+        <div id="drone-hud" class="drone-hud" hidden><strong>DRONE VIEW <b id="drone-speed">100m</b></strong><span>↑ ↓ 전진 · 후진 · ← → 천천히 선회</span></div>
 
         <div id="selection-card" class="selection-card" hidden>
           <button id="close-selection" class="selection-close" type="button" aria-label="선택 닫기">×</button>
@@ -129,7 +136,7 @@
           <button id="bottom-save" class="primary-button bottom-save" type="button">지도 저장 <span aria-hidden="true">→</span></button>
         </div>
 
-        <div class="map-credit">© <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a> · <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen Terrain Tiles</a> / SRTM · USGS</div>
+        <div class="map-credit">© <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a> · <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen Terrain Tiles</a> / SRTM · USGS · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
         <div id="toast" class="toast" role="status" aria-live="polite"></div>
       </section>
     </main>

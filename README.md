@@ -1,5 +1,7 @@
 # Jeju Island 3D
 
+![alt text](image.png)
+
 Interactive 3D Jeju Island planner built with Three.js. It renders the island outline and terrain, lets visitors add places, adjust terrain styling, and save or restore a map as JSON.
 
 ## Run locally
