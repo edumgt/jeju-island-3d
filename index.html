@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>제주 3D 플래너</title>
+  <link rel="stylesheet" href="jeju-planner.css">
+  <script defer src="vendor/three.min.js"></script>
+  <script defer src="vendor/OrbitControls.js"></script>
+  <script defer src="assets/jeju-outline.js"></script>
+  <script defer src="assets/jeju-textures.js"></script>
+  <script defer src="jeju-planner.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="편집 메뉴 열기" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <span class="brand-mark" aria-hidden="true">J</span>
+        <div class="brand-copy"><strong>JEJU STUDIO</strong><span>나만의 제주도 3D 지도</span></div>
+      </div>
+      <div class="topbar-actions">
+        <span id="save-status" class="save-status">● 자동 저장</span>
+        <button id="open-plan" class="text-button" type="button">지도 열기</button>
+        <button id="reset-plan" class="text-button" type="button">처음부터</button>
+        <button id="save-plan" class="primary-button top-save" type="button">지도 저장 <span aria-hidden="true">↗</span></button>
+        <input id="plan-file" type="file" accept="application/json,.json" hidden>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside id="sidebar" class="sidebar" aria-label="지도 편집 도구">
+        <div class="sidebar-intro">
+          <div class="eyebrow"><span class="eyebrow-line"></span> YOUR ISLAND, YOUR MAP</div>
+          <h1>제주를<br>새롭게 살펴보세요.</h1>
+          <p>실제 해안선과 고도를 바탕으로 장소를 고르고, 원하는 시점에서 지도를 완성해 보세요.</p>
+        </div>
+
+        <div class="panel-nav" role="tablist" aria-label="편집 단계">
+          <button class="panel-tab is-active" type="button" role="tab" id="tab-places" aria-controls="panel-places" aria-selected="true" data-tab="places"><span>01</span> 장소</button>
+          <button class="panel-tab" type="button" role="tab" id="tab-layers" aria-controls="panel-layers" aria-selected="false" data-tab="layers"><span>02</span> 스타일</button>
+          <button class="panel-tab" type="button" role="tab" id="tab-guide" aria-controls="panel-guide" aria-selected="false" data-tab="guide"><span>03</span> 안내</button>
+        </div>
+
+        <div class="sidebar-scroll">
+          <section id="panel-places" class="panel" role="tabpanel" aria-labelledby="tab-places">
+            <div class="section-heading"><div><span class="section-kicker">EXPLORE JEJU</span><h2>추천 장소</h2></div><span id="preset-count" class="count-pill">0곳</span></div>
+            <label class="search-field"><span aria-hidden="true">⌕</span><input id="place-search" type="search" placeholder="장소 검색" autocomplete="off" aria-label="추천 장소 검색"></label>
+            <div id="preset-list" class="preset-list"></div>
+
+            <div class="section-heading added-heading"><div><span class="section-kicker">MY MAP</span><h2>지도에 표시한 장소</h2></div><span id="marker-count" class="count-pill">0곳</span></div>
+            <div id="marker-list" class="marker-list"></div>
+
+            <details class="add-details" id="add-details">
+              <summary><span class="plus-circle">+</span> 내 장소 직접 추가</summary>
+              <form id="custom-marker-form" class="custom-form">
+                <label>장소 이름<input id="custom-name" name="name" type="text" maxlength="30" placeholder="예: 나만의 제주 장소" required></label>
+                <button id="pick-location" class="pick-location-button" type="button">⌖ &nbsp;지도에서 위치 고르기</button>
+                <div class="form-row">
+                  <label>위도<input id="custom-lat" name="lat" type="number" step="any" min="33.15" max="33.60" placeholder="33.3617" required></label>
+                  <label>경도<input id="custom-lng" name="lng" type="number" step="any" min="126.12" max="127.00" placeholder="126.5292" required></label>
+                </div>
+                <button class="dark-button" type="submit">지도에 추가</button>
+              </form>
+            </details>
+          </section>
+
+          <section id="panel-layers" class="panel" role="tabpanel" aria-labelledby="tab-layers" hidden>
+            <div class="section-heading"><div><span class="section-kicker">MAP STYLE</span><h2>지도 스타일</h2></div></div>
+            <p class="panel-lead">한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.</p>
+            <div class="style-options" role="radiogroup" aria-label="지형 색상">
+              <label class="style-option"><input type="radio" name="map-style" value="natural" checked><span class="style-swatch natural-swatch"></span><span><strong>자연색</strong><small>차분한 녹색 지형</small></span><span class="radio-dot"></span></label>
+              <label class="style-option"><input type="radio" name="map-style" value="elevation"><span class="style-swatch elevation-swatch"></span><span><strong>고도 강조</strong><small>높이에 따라 달라지는 색</small></span><span class="radio-dot"></span></label>
+            </div>
+            <div class="divider"></div>
+            <div class="range-heading"><label for="height-scale">지형 높이 강조</label><strong id="height-value">100%</strong></div>
+            <input id="height-scale" class="range-input" type="range" min="40" max="180" step="10" value="100">
+            <div class="range-ends"><span>낮게</span><span>높게</span></div>
+            <label class="toggle-row"><span><strong>장소 이름 표시</strong><small>지도 위 장소 레이블</small></span><input id="toggle-labels" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+            <label class="toggle-row"><span><strong>바다 표시</strong><small>섬 주변의 푸른 배경</small></span><input id="toggle-ocean" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+          </section>
+
+          <section id="panel-guide" class="panel" role="tabpanel" aria-labelledby="tab-guide" hidden>
+            <div class="section-heading"><div><span class="section-kicker">HOW TO USE</span><h2>이렇게 사용해 보세요</h2></div></div>
+            <ol class="guide-list">
+              <li><span>1</span><div><strong>장소를 골라요</strong><p>추천 장소를 추가하거나 지도를 클릭해 나만의 장소를 표시하세요.</p></div></li>
+              <li><span>2</span><div><strong>지도를 돌려봐요</strong><p>드래그하면 회전하고, 휠이나 화면의 버튼으로 확대할 수 있어요.</p></div></li>
+              <li><span>3</span><div><strong>원하는 모습으로 저장해요</strong><p>스타일과 장소는 브라우저에 자동 저장됩니다. 지도 저장 버튼으로 JSON 파일도 받을 수 있어요.</p></div></li>
+            </ol>
+            <button id="guide-open-plan" class="guide-open-button" type="button">저장한 지도 파일 열기</button>
+            <div class="source-note"><strong>지형 자료</strong><p>섬 윤곽 참고: Natural Earth 1:10m<br>고도·해안선 보정: Mapzen Terrain Tiles (SRTM/USGS)</p><a href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">자료 출처 보기 ↗</a></div>
+          </section>
+        </div>
+      </aside>
+
+      <section id="viewer" class="viewer" aria-label="제주도 3D 지도">
+        <div id="canvas-container" class="canvas-container"></div>
+        <div id="marker-layer" class="marker-layer"></div>
+        <div id="loading" class="loading" role="status"><span class="loading-spinner"></span><strong>제주도를 불러오는 중</strong><small>실제 해안선과 지형을 준비하고 있어요.</small></div>
+
+        <div class="viewer-title"><span class="viewer-kicker">INTERACTIVE 3D MAP <span class="live-dot"></span> LIVE</span><strong>Jeju Island</strong><span>대한민국 · 북위 33.38°</span></div>
+        <div class="viewer-tip">마우스로 돌리고 확대해 보세요 <span aria-hidden="true">↗</span></div>
+        <div id="pick-instruction" class="pick-instruction" hidden>섬 위의 원하는 위치를 클릭하세요. <button id="cancel-pick" type="button">취소</button></div>
+
+        <div class="view-tools" aria-label="지도 보기 도구">
+          <button type="button" data-action="perspective" class="tool-button is-active" aria-label="3D 보기" title="3D 보기"><span class="tool-icon">◇</span><small>3D</small></button>
+          <button type="button" data-action="top" class="tool-button" aria-label="위에서 보기" title="위에서 보기"><span class="tool-icon">▣</span><small>위에서</small></button>
+          <div class="tool-divider"></div>
+          <button type="button" data-action="focus" class="tool-button" aria-label="지도 중심 맞추기" title="지도 중심 맞추기"><span class="tool-icon">⌖</span><small>중심</small></button>
+        </div>
+
+        <div id="selection-card" class="selection-card" hidden>
+          <button id="close-selection" class="selection-close" type="button" aria-label="선택 닫기">×</button>
+          <span id="selection-kind" class="selection-kind">LANDMARK</span>
+          <strong id="selection-name"></strong>
+          <span id="selection-coordinates" class="selection-coordinates"></span>
+          <button id="remove-selection" class="selection-remove" type="button">지도에서 제거</button>
+        </div>
+
+        <div class="bottom-toolbar">
+          <div class="bottom-tools" aria-label="지도 조작">
+            <button type="button" data-action="zoom-in" aria-label="확대" title="확대">＋</button>
+            <button type="button" data-action="zoom-out" aria-label="축소" title="축소">−</button>
+            <span class="bottom-divider"></span>
+            <button id="undo" type="button" aria-label="실행 취소" title="실행 취소" disabled>↶</button>
+            <button id="redo" type="button" aria-label="다시 실행" title="다시 실행" disabled>↷</button>
+          </div>
+          <div class="bottom-summary"><span id="bottom-marker-count">3개의 장소</span><strong>나만의 제주 지도</strong></div>
+          <button id="bottom-save" class="primary-button bottom-save" type="button">지도 저장 <span aria-hidden="true">→</span></button>
+        </div>
+
+        <div class="map-credit">© <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a> · <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen Terrain Tiles</a> / SRTM · USGS</div>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
