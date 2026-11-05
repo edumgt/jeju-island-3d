@@ -24,6 +24,32 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .brand-copy span { font-size: 11px; color: #7a8794; }
 .topbar-actions { gap: 10px; }
 .save-status { color: #5d9977; font-size: 12px; white-space: nowrap; margin-right: 13px; }
+
+/* GNB Destination Navigation Tabs */
+.gnb-destination-nav { display: flex; align-items: center; gap: 8px; margin: 0 10px; }
+.gnb-destination-kicker { font-size: 10px; font-weight: 850; letter-spacing: .08em; color: #8e9ca8; text-transform: uppercase; white-space: nowrap; }
+.destination-tabs { display: flex; align-items: center; gap: 6px; background: #f2f5f7; padding: 4px; border-radius: 12px; border: 1px solid #e1e7eb; }
+.dest-tab { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; padding: 6px 14px 6px 10px; border-radius: 9px; color: #526273; transition: all .18s ease; text-align: left; }
+.dest-tab:hover { background: rgba(255, 255, 255, 0.6); color: #17243a; }
+.dest-tab.is-active { background: #ffffff; color: #1769c1; box-shadow: 0 2px 8px rgba(18, 55, 94, .08); font-weight: 800; }
+.dest-tab[data-region="haeundae"].is-active { color: #0077b6; }
+.dest-tab-icon { font-size: 17px; line-height: 1; flex: none; }
+.dest-tab-text { display: flex; flex-direction: column; gap: 1px; }
+.dest-tab-text strong { font-size: 12px; line-height: 1.2; font-weight: 800; white-space: nowrap; }
+.dest-tab-text small { font-size: 10px; color: #8593a0; font-weight: 600; white-space: nowrap; }
+.dest-tab.is-active .dest-tab-text small { color: #5d758f; }
+
+@media (max-width: 900px) {
+  .gnb-destination-kicker { display: none; }
+  .dest-tab { padding: 6px 10px; }
+  .dest-tab-text small { display: none; }
+}
+@media (max-width: 680px) {
+  .gnb-destination-nav { margin: 0; }
+  .dest-tab-text { display: none; }
+  .dest-tab { padding: 6px 8px; }
+}
+
 .text-button { min-height: 38px; border: 0; padding: 0 12px; color: #4c5a6b; background: transparent; font-size: 12px; font-weight: 700; white-space: nowrap; border-radius: 8px; }
 .text-button:hover { background: #f2f5f7; color: #1b2b42; }
 .primary-button { border: 0; color: white; background: #1769c1; font-weight: 800; box-shadow: 0 6px 16px rgba(23, 105, 193, .19); transition: transform .18s, background .18s, box-shadow .18s; }

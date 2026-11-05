@@ -2,15 +2,9 @@
   'use strict';
 
   const $ = (selector) => document.querySelector(selector);
-  const BOUNDS = { west: 126.12, south: 33.15, east: 127.00, north: 33.60 };
-  const MAP_WIDTH = 103;
-  const MAP_DEPTH = 57;
-  const HEIGHT_FACTOR = 0.008;
-  const DRONE_ALTITUDE_METERS = 100;
-  const STORAGE_KEY = 'jeju-studio-plan-v1';
-  const ROADS_CACHE_KEY = 'jeju-studio-osm-roads-v1';
-  const ROADS_CACHE_AGE = 7 * 24 * 60 * 60 * 1000;
-  const PRESETS = [
+
+  // Region Definitions: Jeju Island & Busan Haeundae
+  const PRESETS_JEJU = [
     { id: 'hallasan', name: '한라산', category: '화산 지형', icon: '⛰', lat: 33.3617, lng: 126.5292 },
     { id: 'seongsan', name: '성산일출봉', category: '자연 명소', icon: '☀', lat: 33.4581, lng: 126.9426 },
     { id: 'hyeopjae', name: '협재해수욕장', category: '해변', icon: '〰', lat: 33.3938, lng: 126.2396 },
@@ -18,8 +12,70 @@
     { id: 'airport', name: '제주국제공항', category: '교통', icon: '✈', lat: 33.5104, lng: 126.4914 }
   ];
 
-  const defaultState = () => ({
-    markers: PRESETS.slice(0, 3).map(({ id, name, category, lat, lng }) => ({ id, name, category, lat, lng, custom: false })),
+  const REGIONS = {
+    jeju: {
+      id: 'jeju',
+      name: '제주도',
+      subTitle: '한라산·성산일출봉',
+      brandTitle: 'JEJU STUDIO',
+      brandSub: '나만의 제주도 3D 지도',
+      brandMark: 'J',
+      brandColor: '#1769c1',
+      storageKey: 'jeju-studio-plan-v1',
+      sidebarEyebrow: 'YOUR ISLAND, YOUR MAP',
+      sidebarTitle: '제주를<br>새롭게 살펴보세요.',
+      sidebarDesc: '실제 해안선과 고도를 바탕으로 장소를 고르고, 원하는 시점에서 지도를 완성해 보세요.',
+      viewerTitle: 'Jeju Island',
+      viewerSub: '대한민국 · 북위 33.38°',
+      summaryTitle: '나만의 제주 지도',
+      bounds: { west: 126.12, south: 33.15, east: 127.00, north: 33.60 },
+      mapWidth: 103,
+      mapDepth: 57,
+      heightFactor: 0.008,
+      droneAltitudeMeters: 100,
+      oceanBox: [118, 1.1, 69],
+      oceanRimBox: [120, 0.65, 71],
+      lightPos: [-35, 85, 45],
+      defaultCamDistance: 180,
+      customDefaults: { latMin: 33.15, latMax: 33.60, latPlaceholder: '33.3617', lngMin: 126.12, lngMax: 127.00, lngPlaceholder: '126.5292' },
+      presets: PRESETS_JEJU
+    },
+    haeundae: {
+      id: 'haeundae',
+      name: '부산 해운대',
+      subTitle: '해수욕장·동백섬',
+      brandTitle: 'HAEUNDAE STUDIO',
+      brandSub: '부산 해운대 3D 입체 지도',
+      brandMark: 'B',
+      brandColor: '#0077b6',
+      storageKey: 'haeundae-studio-plan-v1',
+      sidebarEyebrow: 'YOUR COAST, YOUR MAP',
+      sidebarTitle: '부산 해운대를<br>3D로 입체 탐험하세요.',
+      sidebarDesc: '동백섬부터 해운대 백사장, 달맞이길과 장산까지 해운대의 대표 명소를 3D로 플래닝해 보세요.',
+      viewerTitle: 'Busan Haeundae',
+      viewerSub: '대한민국 부산광역시 · 북위 35.16°',
+      summaryTitle: '나만의 해운대 지도',
+      bounds: { west: 129.130, south: 35.145, east: 129.200, north: 35.195 },
+      mapWidth: 100,
+      mapDepth: 65,
+      heightFactor: 0.016,
+      droneAltitudeMeters: 80,
+      oceanBox: [115, 1.1, 75],
+      oceanRimBox: [117, 0.65, 77],
+      lightPos: [-30, 85, 40],
+      defaultCamDistance: 165,
+      customDefaults: { latMin: 35.145, latMax: 35.195, latPlaceholder: '35.1587', lngMin: 129.130, lngMax: 129.200, lngPlaceholder: '129.1604' },
+      presets: window.HAEUNDAE_PRESETS || []
+    }
+  };
+
+  let currentRegionId = 'jeju';
+  function getRegion() {
+    return REGIONS[currentRegionId];
+  }
+
+  const defaultState = (region) => ({
+    markers: region.presets.slice(0, 3).map(({ id, name, category, lat, lng }) => ({ id, name, category, lat, lng, custom: false })),
     selectedId: null,
     mapStyle: 'natural',
     heightScale: 100,
@@ -28,15 +84,16 @@
     showRoads: true
   });
 
-  function cleanState(raw) {
+  function cleanState(raw, region) {
     if (!raw || typeof raw !== 'object' || !Array.isArray(raw.markers)) throw new Error('지도 데이터 형식이 올바르지 않습니다.');
+    const bounds = region.bounds;
     const ids = new Set();
     const markers = raw.markers.slice(0, 50).filter((marker) => {
       if (!marker || typeof marker.id !== 'string' || typeof marker.name !== 'string') return false;
       if (ids.has(marker.id) || !Number.isFinite(Number(marker.lat)) || !Number.isFinite(Number(marker.lng))) return false;
       const lat = Number(marker.lat);
       const lng = Number(marker.lng);
-      if (lat < BOUNDS.south || lat > BOUNDS.north || lng < BOUNDS.west || lng > BOUNDS.east) return false;
+      if (lat < bounds.south || lat > bounds.north || lng < bounds.west || lng > bounds.east) return false;
       ids.add(marker.id);
       return true;
     }).map((marker) => ({
@@ -58,20 +115,22 @@
     };
   }
 
-  function loadState() {
+  function loadState(region) {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? cleanState(JSON.parse(saved)) : defaultState();
+      const saved = localStorage.getItem(region.storageKey);
+      return saved ? cleanState(JSON.parse(saved), region) : defaultState(region);
     } catch (_) {
-      return defaultState();
+      return defaultState(region);
     }
   }
 
-  let state = loadState();
+  let state = loadState(getRegion());
   const undoStack = [];
   const redoStack = [];
-  const outline = window.JEJU_OUTLINE;
-  let scene, camera, renderer, controls, terrain, ocean, shoreline, roadGroup, textures, heightData;
+
+  // Three.js and Scene Variables
+  let scene, camera, renderer, controls, terrain, ocean, oceanRim, shoreline, baseMesh, roadGroup;
+  let regionCaches = {}; // Caches for heightData, textures, outline, roads per region
   let renderedHeightScale, renderedMapStyle;
   let markerObjects = [];
   let markerHits = [];
@@ -86,16 +145,14 @@
   let lastFrameTime = 0;
   const droneKeys = new Set();
   const droneVelocity = new THREE.Vector3();
-  let roadWays = Array.isArray(window.JEJU_ROADS) ? window.JEJU_ROADS.map((road) => ({
-    tags: { highway: road.type, name: road.name },
-    geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
-  })) : [];
+
   const viewer = $('#viewer');
   const canvasContainer = $('#canvas-container');
   const markerLayer = $('#marker-layer');
 
   function showToast(message) {
     const toast = $('#toast');
+    if (!toast) return;
     toast.textContent = message;
     toast.classList.add('is-visible');
     clearTimeout(toastTimer);
@@ -104,7 +161,7 @@
 
   function persist() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(getRegion().storageKey, JSON.stringify(state));
       $('#save-status').textContent = '● 자동 저장';
     } catch (_) {
       $('#save-status').textContent = '저장은 파일로 이용해 주세요';
@@ -126,7 +183,7 @@
   function undo() {
     if (!undoStack.length) return;
     redoStack.push(JSON.stringify(state));
-    state = cleanState(JSON.parse(undoStack.pop()));
+    state = cleanState(JSON.parse(undoStack.pop()), getRegion());
     renderState();
     persist();
   }
@@ -134,12 +191,32 @@
   function redo() {
     if (!redoStack.length) return;
     undoStack.push(JSON.stringify(state));
-    state = cleanState(JSON.parse(redoStack.pop()));
+    state = cleanState(JSON.parse(redoStack.pop()), getRegion());
     renderState();
     persist();
   }
 
-  function pointInIsland(lat, lng) {
+  function getOutline() {
+    return currentRegionId === 'jeju' ? window.JEJU_OUTLINE : window.HAEUNDAE_OUTLINE;
+  }
+
+  function getRoadWays() {
+    if (currentRegionId === 'jeju') {
+      return Array.isArray(window.JEJU_ROADS) ? window.JEJU_ROADS.map((road) => ({
+        tags: { highway: road.type, name: road.name },
+        geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
+      })) : [];
+    } else {
+      return Array.isArray(window.HAEUNDAE_ROADS) ? window.HAEUNDAE_ROADS.map((road) => ({
+        tags: { highway: road.type, name: road.name },
+        geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
+      })) : [];
+    }
+  }
+
+  function pointInLand(lat, lng) {
+    const outline = getOutline();
+    if (!outline || !outline.length) return true;
     let inside = false;
     for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
       const [xi, yi] = outline[i];
@@ -150,32 +227,38 @@
   }
 
   function worldPosition(lat, lng) {
+    const r = getRegion();
     return {
-      x: ((lng - BOUNDS.west) / (BOUNDS.east - BOUNDS.west) - 0.5) * MAP_WIDTH,
-      z: (0.5 - (lat - BOUNDS.south) / (BOUNDS.north - BOUNDS.south)) * MAP_DEPTH
+      x: ((lng - r.bounds.west) / (r.bounds.east - r.bounds.west) - 0.5) * r.mapWidth,
+      z: (0.5 - (lat - r.bounds.south) / (r.bounds.north - r.bounds.south)) * r.mapDepth
     };
   }
 
   function heightAt(lat, lng) {
-    if (!heightData) return 0;
-    const x = Math.max(0, Math.min(heightData.width - 1.001,
-      (lng - BOUNDS.west) / (BOUNDS.east - BOUNDS.west) * heightData.width - 0.5));
-    const y = Math.max(0, Math.min(heightData.height - 1.001,
-      (BOUNDS.north - lat) / (BOUNDS.north - BOUNDS.south) * heightData.height - 0.5));
+    const cache = regionCaches[currentRegionId];
+    if (!cache || !cache.heightData) return 0;
+    const r = getRegion();
+    const hd = cache.heightData;
+    const x = Math.max(0, Math.min(hd.width - 1.001,
+      (lng - r.bounds.west) / (r.bounds.east - r.bounds.west) * hd.width - 0.5));
+    const y = Math.max(0, Math.min(hd.height - 1.001,
+      (r.bounds.north - lat) / (r.bounds.north - r.bounds.south) * hd.height - 0.5));
     const x0 = Math.floor(x), y0 = Math.floor(y);
     const dx = x - x0, dy = y - y0;
-    const index = (row, col) => (row * heightData.width + col) * 4;
-    const pixels = heightData.pixels;
+    const index = (row, col) => (row * hd.width + col) * 4;
+    const pixels = hd.pixels;
     const h00 = pixels[index(y0, x0)];
     const h10 = pixels[index(y0, x0 + 1)];
     const h01 = pixels[index(y0 + 1, x0)];
     const h11 = pixels[index(y0 + 1, x0 + 1)];
+    const maxMeters = currentRegionId === 'jeju' ? 2000 : 650;
     return ((h00 * (1 - dx) + h10 * dx) * (1 - dy) +
-      (h01 * (1 - dx) + h11 * dx) * dy) / 255 * 2000;
+      (h01 * (1 - dx) + h11 * dx) * dy) / 255 * maxMeters;
   }
 
   function surfaceHeight(lat, lng) {
-    return heightAt(lat, lng) * HEIGHT_FACTOR * state.heightScale / 100;
+    const r = getRegion();
+    return heightAt(lat, lng) * r.heightFactor * state.heightScale / 100;
   }
 
   function markerById(id) {
@@ -185,9 +268,10 @@
   function renderPresets() {
     const list = $('#preset-list');
     const query = $('#place-search').value.trim().toLowerCase();
-    const matching = PRESETS.filter((item) => `${item.name} ${item.category}`.toLowerCase().includes(query));
+    const region = getRegion();
+    const matching = region.presets.filter((item) => `${item.name} ${item.category}`.toLowerCase().includes(query));
     list.replaceChildren();
-    $('#preset-count').textContent = `${PRESETS.length}곳`;
+    $('#preset-count').textContent = `${region.presets.length}곳`;
     if (!matching.length) {
       const empty = document.createElement('div');
       empty.className = 'empty-state';
@@ -279,14 +363,17 @@
     $('#road-toggle').setAttribute('aria-pressed', String(state.showRoads));
     $('#road-toggle').setAttribute('aria-label', `주요 도로 안내 ${state.showRoads ? '끄기' : '켜기'}`);
     markerLayer.style.display = state.showLabels && !pickingLocation ? '' : 'none';
-    if (terrain) {
+
+    const cache = regionCaches[currentRegionId];
+    if (terrain && cache && cache.textures) {
       if (renderedMapStyle !== state.mapStyle) {
-        terrain.material.map = textures[state.mapStyle];
+        terrain.material.map = cache.textures[state.mapStyle];
         terrain.material.needsUpdate = true;
         renderedMapStyle = state.mapStyle;
       }
-      ocean.visible = state.showOcean;
+      if (ocean) ocean.visible = state.showOcean;
       if (roadGroup) roadGroup.visible = state.showRoads;
+      const roadWays = getRoadWays();
       $('#road-legend').hidden = !state.showRoads || !roadWays.length;
       if (renderedHeightScale !== state.heightScale) updateTerrainHeight();
       syncMarkers();
@@ -326,11 +413,12 @@
   }
 
   function savePlan() {
-    const file = new Blob([JSON.stringify({ version: 1, ...state }, null, 2)], { type: 'application/json' });
+    const r = getRegion();
+    const file = new Blob([JSON.stringify({ region: r.id, version: 1, ...state }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(file);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'jeju-map.json';
+    link.download = `${r.id}-map.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast('지도를 파일로 저장했어요.');
@@ -340,8 +428,9 @@
     if (!camera || !controls) return;
     if (droneMode) setDroneMode(false);
     viewMode = mode;
+    const r = getRegion();
     const aspect = Math.max(0.4, viewer.clientWidth / Math.max(1, viewer.clientHeight));
-    const distance = Math.max(180, 63 / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect));
+    const distance = Math.max(r.defaultCamDistance, (r.mapWidth * 0.62) / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect));
     camera.up.set(0, mode === 'top' ? 0 : 1, mode === 'top' ? -1 : 0);
     controls.target.set(0, -15, 0);
     if (mode === 'top') camera.position.set(0, distance - 17, 0.01);
@@ -374,9 +463,10 @@
   }
 
   function droneAltitudeAt(position) {
-    const lat = BOUNDS.north - (position.z / MAP_DEPTH + 0.5) * (BOUNDS.north - BOUNDS.south);
-    const lng = BOUNDS.west + (position.x / MAP_WIDTH + 0.5) * (BOUNDS.east - BOUNDS.west);
-    const altitude = DRONE_ALTITUDE_METERS * HEIGHT_FACTOR * state.heightScale / 100;
+    const r = getRegion();
+    const lat = r.bounds.north - (position.z / r.mapDepth + 0.5) * (r.bounds.north - r.bounds.south);
+    const lng = r.bounds.west + (position.x / r.mapWidth + 0.5) * (r.bounds.east - r.bounds.west);
+    const altitude = r.droneAltitudeMeters * r.heightFactor * state.heightScale / 100;
     return surfaceHeight(lat, lng) + altitude;
   }
 
@@ -392,6 +482,7 @@
     $('#drone-toggle').classList.toggle('is-active', enabled);
     $('#drone-toggle').setAttribute('aria-pressed', String(enabled));
     $('#drone-toggle').setAttribute('aria-label', `드론 비행 보기 ${enabled ? '끄기' : '켜기'}`);
+    const r = getRegion();
     if (enabled) {
       controls.enabled = false;
       viewMode = 'drone';
@@ -404,7 +495,7 @@
       camera.position.y = droneAltitudeAt(camera.position);
       droneVelocity.set(0, 0, 0);
       updateDroneCamera();
-      showToast('방향키로 천천히 제주도를 둘러보세요. 고도는 지형 위 100m로 유지됩니다.');
+      showToast(`방향키로 천천히 ${r.name}를 둘러보세요. 고도는 지형 위 ${r.droneAltitudeMeters}m로 유지됩니다.`);
     } else {
       droneTargetSpeed = 0;
       droneVelocity.set(0, 0, 0);
@@ -416,6 +507,7 @@
 
   function updateDroneFlight(delta) {
     if (!droneMode) return;
+    const r = getRegion();
     const turn = (droneKeys.has('ArrowRight') ? 1 : 0) - (droneKeys.has('ArrowLeft') ? 1 : 0);
     droneYaw -= turn * delta * 0.7;
     const throttle = (droneKeys.has('ArrowUp') ? 1 : 0) - (droneKeys.has('ArrowDown') ? 1 : 0);
@@ -423,8 +515,8 @@
     const desiredVelocity = new THREE.Vector3(Math.sin(droneYaw) * droneTargetSpeed, 0, Math.cos(droneYaw) * droneTargetSpeed);
     droneVelocity.lerp(desiredVelocity, 1 - Math.exp(-delta * 2.7));
     camera.position.addScaledVector(droneVelocity, delta);
-    const boundedX = THREE.MathUtils.clamp(camera.position.x, -MAP_WIDTH * 0.68, MAP_WIDTH * 0.68);
-    const boundedZ = THREE.MathUtils.clamp(camera.position.z, -MAP_DEPTH * 0.68, MAP_DEPTH * 0.68);
+    const boundedX = THREE.MathUtils.clamp(camera.position.x, -r.mapWidth * 0.68, r.mapWidth * 0.68);
+    const boundedZ = THREE.MathUtils.clamp(camera.position.z, -r.mapDepth * 0.68, r.mapDepth * 0.68);
     if (boundedX !== camera.position.x || boundedZ !== camera.position.z) droneTargetSpeed = 0;
     camera.position.x = boundedX;
     camera.position.z = boundedZ;
@@ -432,10 +524,96 @@
     updateDroneCamera();
     droneBank += (-turn * 0.14 - droneBank) * (1 - Math.exp(-delta * 5));
     camera.rotation.z = droneBank;
-    $('#drone-speed').textContent = `${DRONE_ALTITUDE_METERS}m`;
+    $('#drone-speed').textContent = `${r.droneAltitudeMeters}m`;
+  }
+
+  function applyRegionUI() {
+    const r = getRegion();
+    // Brand update
+    $('#brand-mark').textContent = r.brandMark;
+    $('#brand-mark').style.background = r.brandColor;
+    $('#brand-title').textContent = r.brandTitle;
+    $('#brand-sub').textContent = r.brandSub;
+
+    // GNB Tab state
+    document.querySelectorAll('.dest-tab').forEach((tab) => {
+      const active = tab.dataset.region === r.id;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+    });
+
+    // Sidebar text
+    $('#sidebar-eyebrow').textContent = r.sidebarEyebrow;
+    $('#sidebar-title').innerHTML = r.sidebarTitle;
+    $('#sidebar-desc').textContent = r.sidebarDesc;
+    const kicker = $('#sidebar-kicker');
+    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : 'EXPLORE HAEUNDAE';
+    const styleLead = $('#panel-lead-style');
+    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.';
+    const customName = $('#custom-name');
+    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : '예: 나만의 해운대 장소';
+
+    // Viewer badges
+    $('#viewer-region-name').textContent = r.viewerTitle;
+    $('#viewer-region-coord').textContent = r.viewerSub;
+    $('#bottom-summary-title').textContent = r.summaryTitle;
+
+    // Form inputs
+    const latInp = $('#custom-lat');
+    const lngInp = $('#custom-lng');
+    latInp.min = r.customDefaults.latMin;
+    latInp.max = r.customDefaults.latMax;
+    latInp.placeholder = r.customDefaults.latPlaceholder;
+    lngInp.min = r.customDefaults.lngMin;
+    lngInp.max = r.customDefaults.lngMax;
+    lngInp.placeholder = r.customDefaults.lngPlaceholder;
+
+    // Search reset
+    $('#place-search').value = '';
+  }
+
+  async function switchRegion(newRegionId) {
+    if (newRegionId === currentRegionId) return;
+    persist(); // Save current region state first
+
+    currentRegionId = newRegionId;
+    const r = getRegion();
+    applyRegionUI();
+
+    // Load state for the new region
+    state = loadState(r);
+    undoStack.length = 0;
+    redoStack.length = 0;
+
+    // Show loading indicator
+    const loading = $('#loading');
+    loading.hidden = false;
+    $('#loading-title').textContent = `${r.name} 3D 지도를 불러오는 중`;
+    $('#loading-sub').textContent = '해안선과 고도 지형을 준비하고 있어요.';
+
+    try {
+      await prepareRegionAssets(r.id);
+      rebuildRegionScene();
+      setView('perspective');
+      renderState();
+      loading.hidden = true;
+      showToast(`${r.name} 3D 플래너로 전환했어요.`);
+    } catch (err) {
+      console.error(err);
+      loading.hidden = true;
+      showToast(`${r.name} 지도를 불러오는데 실패했습니다.`);
+    }
   }
 
   function initUI() {
+    // Destination Tabs in GNB
+    document.querySelectorAll('.dest-tab').forEach((button) => {
+      button.addEventListener('click', () => {
+        const dest = button.dataset.region;
+        if (dest) switchRegion(dest);
+      });
+    });
+
     document.querySelectorAll('.panel-tab').forEach((button) => {
       button.addEventListener('click', () => setTab(button.dataset.tab));
     });
@@ -443,60 +621,66 @@
     $('#preset-list').addEventListener('click', (event) => {
       const button = event.target.closest('[data-preset]');
       if (!button) return;
-      const preset = PRESETS.find((item) => item.id === button.dataset.preset);
+      const r = getRegion();
+      const preset = r.presets.find((item) => item.id === button.dataset.preset);
       if (markerById(preset.id)) {
         selectMarker(preset.id);
         return;
       }
       commit(() => {
-        const { id, name, category, lat, lng } = preset;
-        state.markers.push({ id, name, category, lat, lng, custom: false });
-        state.selectedId = id;
+        state.markers.push({ ...preset, custom: false });
+        state.selectedId = preset.id;
       });
       showToast(`${preset.name}을(를) 지도에 추가했어요.`);
     });
     $('#marker-list').addEventListener('click', (event) => {
-      const remove = event.target.closest('[data-remove]');
-      const select = event.target.closest('[data-select]');
-      if (remove) removeMarker(remove.dataset.remove);
-      else if (select) selectMarker(select.dataset.select);
-    });
-    $('#custom-marker-form').addEventListener('submit', (event) => {
-      event.preventDefault();
-      const name = $('#custom-name').value.trim();
-      const lat = Number($('#custom-lat').value);
-      const lng = Number($('#custom-lng').value);
-      if (!name || !Number.isFinite(lat) || !Number.isFinite(lng) || !pointInIsland(lat, lng)) {
-        showToast('제주도 안의 위도·경도를 입력해 주세요.');
+      const selectButton = event.target.closest('[data-select]');
+      if (selectButton) {
+        selectMarker(selectButton.dataset.select);
         return;
       }
-      if (state.markers.length >= 50) {
-        showToast('장소는 최대 50곳까지 표시할 수 있어요.');
-        return;
-      }
-      commit(() => {
-        const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        state.markers.push({ id, name, category: '내 장소', lat, lng, custom: true });
-        state.selectedId = id;
-      });
-      $('#custom-marker-form').reset();
-      $('#add-details').open = false;
-      setPickingLocation(false);
-      showToast(`${name}을(를) 지도에 추가했어요.`);
+      const removeButton = event.target.closest('[data-remove]');
+      if (removeButton) removeMarker(removeButton.dataset.remove);
     });
     $('#pick-location').addEventListener('click', () => {
-      if (!terrain) {
-        showToast('지도가 준비된 뒤 위치를 고를 수 있어요.');
-        return;
-      }
       setPickingLocation(true);
-      $('#sidebar').classList.remove('is-open');
-      $('#mobile-menu').setAttribute('aria-expanded', 'false');
-      showToast('제주도 섬 위를 클릭해 주세요.');
+      showToast('지도 위를 클릭해 원하는 위치를 지정하세요.');
     });
-    $('#cancel-pick').addEventListener('click', () => setPickingLocation(false));
-    document.querySelectorAll('input[name="map-style"]').forEach((input) => {
-      input.addEventListener('change', () => commit(() => { state.mapStyle = input.value; }));
+    const cancelPick = $('#cancel-pick');
+    if (cancelPick) cancelPick.addEventListener('click', () => setPickingLocation(false));
+
+    const customForm = $('#custom-marker-form') || $('#custom-place-form');
+    if (customForm) {
+      customForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = $('#custom-name').value.trim();
+        const lat = Number($('#custom-lat').value);
+        const lng = Number($('#custom-lng').value);
+        const r = getRegion();
+        if (!name) return;
+        if (!pointInLand(lat, lng)) {
+          showToast(`${r.name} 영역 안의 위치를 입력해 주세요.`);
+          return;
+        }
+        const id = `custom-${Date.now()}`;
+        commit(() => {
+          state.markers.push({ id, name, category: '내 장소', lat, lng, custom: true });
+          state.selectedId = id;
+        });
+        $('#custom-name').value = '';
+        $('#custom-lat').value = '';
+        $('#custom-lng').value = '';
+        $('#add-details').open = false;
+        showToast(`${name}을(를) 지도에 추가했어요.`);
+      });
+    }
+    document.querySelectorAll('input[name="map-style"]').forEach((radio) => {
+      radio.addEventListener('change', (event) => {
+        commit(() => { state.mapStyle = event.target.value; });
+      });
+    });
+    $('#height-scale').addEventListener('input', (event) => {
+      $('#height-value').textContent = `${event.target.value}%`;
     });
     $('#height-scale').addEventListener('change', (event) => {
       const value = Number(event.target.value);
@@ -526,7 +710,8 @@
       const file = event.target.files[0];
       if (!file) return;
       try {
-        const imported = cleanState(JSON.parse(await file.text()));
+        const parsed = JSON.parse(await file.text());
+        const imported = cleanState(parsed, getRegion());
         commit(() => { state = imported; });
         setPickingLocation(false);
         showToast('저장한 지도를 열었어요.');
@@ -536,7 +721,7 @@
       event.target.value = '';
     });
     $('#reset-plan').addEventListener('click', () => {
-      commit(() => { state = defaultState(); });
+      commit(() => { state = defaultState(getRegion()); });
       setPickingLocation(false);
       setView('perspective');
       showToast('처음 지도 구성으로 돌아왔어요.');
@@ -555,6 +740,7 @@
       $('#mobile-menu').setAttribute('aria-expanded', String(open));
       $('#mobile-menu').setAttribute('aria-label', open ? '편집 메뉴 닫기' : '편집 메뉴 열기');
     });
+    applyRegionUI();
     renderState();
   }
 
@@ -586,7 +772,73 @@
     renderer.setSize(width, height);
   }
 
+  async function prepareRegionAssets(regionId) {
+    if (regionCaches[regionId]) return regionCaches[regionId];
+
+    if (regionId === 'jeju') {
+      const [image, natural, elevation] = await Promise.all([
+        loadImage(window.JEJU_ASSETS.height),
+        loadTexture(window.JEJU_ASSETS.natural),
+        loadTexture(window.JEJU_ASSETS.elevation)
+      ]);
+      const sourceCanvas = document.createElement('canvas');
+      sourceCanvas.width = image.width;
+      sourceCanvas.height = image.height;
+      const context = sourceCanvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(image, 0, 0);
+      const heightData = { width: image.width, height: image.height, pixels: context.getImageData(0, 0, image.width, image.height).data };
+      regionCaches.jeju = {
+        heightData,
+        textures: { natural, elevation }
+      };
+    } else if (regionId === 'haeundae') {
+      if (typeof window.createHaeundaeAssets !== 'function') {
+        throw new Error('해운대 3D 에셋 생성기를 찾을 수 없습니다.');
+      }
+      const { heightCanvas, naturalCanvas, elevationCanvas } = window.createHaeundaeAssets();
+      const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
+      const heightData = {
+        width: heightCanvas.width,
+        height: heightCanvas.height,
+        pixels: hCtx.getImageData(0, 0, heightCanvas.width, heightCanvas.height).data
+      };
+
+      const natural = new THREE.CanvasTexture(naturalCanvas);
+      natural.encoding = THREE.sRGBEncoding;
+      natural.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+      const elevation = new THREE.CanvasTexture(elevationCanvas);
+      elevation.encoding = THREE.sRGBEncoding;
+      elevation.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+      regionCaches.haeundae = {
+        heightData,
+        textures: { natural, elevation }
+      };
+    }
+
+    return regionCaches[regionId];
+  }
+
+  function disposeObject(object) {
+    if (!object) return;
+    object.traverse((item) => {
+      if (item.geometry) item.geometry.dispose();
+      if (item.material) {
+        if (Array.isArray(item.material)) item.material.forEach((m) => m.dispose());
+        else item.material.dispose();
+      }
+    });
+    if (object.parent) object.parent.remove(object);
+  }
+
   function buildIslandBase() {
+    if (baseMesh) disposeObject(baseMesh);
+    if (shoreline) disposeObject(shoreline);
+
+    const outline = getOutline();
+    if (!outline || !outline.length) return;
+
     const shape = new THREE.Shape();
     outline.forEach(([lng, lat], index) => {
       const { x, z } = worldPosition(lat, lng);
@@ -594,15 +846,16 @@
       else shape.lineTo(x, z);
     });
     shape.closePath();
+
     const geometry = new THREE.ExtrudeGeometry(shape, { depth: 1.45, bevelEnabled: false, steps: 1 });
     geometry.rotateX(Math.PI / 2);
-    const base = new THREE.Mesh(geometry, [
+    baseMesh = new THREE.Mesh(geometry, [
       new THREE.MeshStandardMaterial({ color: 0xcdd9c5, roughness: 1 }),
       new THREE.MeshStandardMaterial({ color: 0xe0e8dc, roughness: 1 })
     ]);
-    base.castShadow = true;
-    base.receiveShadow = true;
-    scene.add(base);
+    baseMesh.castShadow = true;
+    baseMesh.receiveShadow = true;
+    scene.add(baseMesh);
 
     const points = outline.map(([lng, lat]) => {
       const { x, z } = worldPosition(lat, lng);
@@ -616,16 +869,23 @@
   }
 
   function buildTerrain() {
+    if (terrain) disposeObject(terrain);
+
+    const r = getRegion();
+    const cache = regionCaches[currentRegionId];
+    if (!cache || !cache.textures) return;
+
     const columns = 320;
-    const rows = 160;
+    const rows = 180;
     const positions = new Float32Array((columns + 1) * (rows + 1) * 3);
     const uvs = new Float32Array((columns + 1) * (rows + 1) * 2);
     const indices = [];
+
     for (let row = 0; row <= rows; row++) {
       for (let column = 0; column <= columns; column++) {
         const index = row * (columns + 1) + column;
-        positions[index * 3] = (column / columns - 0.5) * MAP_WIDTH;
-        positions[index * 3 + 2] = (row / rows - 0.5) * MAP_DEPTH;
+        positions[index * 3] = (column / columns - 0.5) * r.mapWidth;
+        positions[index * 3 + 2] = (row / rows - 0.5) * r.mapDepth;
         uvs[index * 2] = column / columns;
         uvs[index * 2 + 1] = 1 - row / rows;
         if (row < rows && column < columns) {
@@ -638,8 +898,9 @@
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
+
     terrain = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-      map: textures[state.mapStyle],
+      map: cache.textures[state.mapStyle],
       transparent: true,
       alphaTest: 0.08,
       side: THREE.DoubleSide,
@@ -656,24 +917,18 @@
 
   function updateTerrainHeight() {
     if (!terrain) return;
+    const r = getRegion();
     const position = terrain.geometry.attributes.position;
     for (let i = 0; i < position.count; i++) {
-      const lng = BOUNDS.west + (position.getX(i) / MAP_WIDTH + 0.5) * (BOUNDS.east - BOUNDS.west);
-      const lat = BOUNDS.north - (position.getZ(i) / MAP_DEPTH + 0.5) * (BOUNDS.north - BOUNDS.south);
+      const lng = r.bounds.west + (position.getX(i) / r.mapWidth + 0.5) * (r.bounds.east - r.bounds.west);
+      const lat = r.bounds.north - (position.getZ(i) / r.mapDepth + 0.5) * (r.bounds.north - r.bounds.south);
       position.setY(i, surfaceHeight(lat, lng) + 0.035);
     }
     position.needsUpdate = true;
     terrain.geometry.computeVertexNormals();
     terrain.geometry.computeBoundingSphere();
     renderedHeightScale = state.heightScale;
-    if (roadWays.length) buildRoads();
-  }
-
-  function disposeObject(object) {
-    object.traverse((item) => {
-      if (item.geometry) item.geometry.dispose();
-      if (item.material) item.material.dispose();
-    });
+    buildRoads();
   }
 
   function roadColor(type) {
@@ -705,97 +960,53 @@
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     geometry.setIndex(indices);
-    const material = new THREE.MeshBasicMaterial({
+    geometry.computeVertexNormals();
+    return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
       color,
-      transparent: true,
-      opacity: 0.98,
-      depthTest: false,
+      side: THREE.DoubleSide,
       depthWrite: false,
-      side: THREE.DoubleSide
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.renderOrder = 2;
-    return mesh;
+      polygonOffset: true,
+      polygonOffsetFactor: -2
+    }));
   }
 
   function buildRoads() {
-    if (!scene || !heightData) return;
-    if (roadGroup) {
-      scene.remove(roadGroup);
-      disposeObject(roadGroup);
-    }
+    if (roadGroup) disposeObject(roadGroup);
     roadGroup = new THREE.Group();
-    roadGroup.name = 'OSM major roads';
-    for (const way of roadWays) {
-      if (!Array.isArray(way.geometry) || way.geometry.length < 2) continue;
-      const points = way.geometry.map((point) => {
-        const { x, z } = worldPosition(point.lat, point.lon);
-        return new THREE.Vector3(x, surfaceHeight(point.lat, point.lon) + 0.48, z);
+    const roadWays = getRoadWays();
+    if (!roadWays.length) return;
+
+    for (const road of roadWays) {
+      const rawPoints = road.geometry.map((pt) => {
+        const { x, z } = worldPosition(pt.lat, pt.lon);
+        const y = surfaceHeight(pt.lat, pt.lon);
+        return new THREE.Vector3(x, y + 0.08, z);
       });
-      const roadType = way.tags && way.tags.highway;
-      const width = roadType === 'motorway' || roadType === 'trunk' ? 0.56 : roadType === 'primary' ? 0.46 : 0.36;
-      const outline = createRoadRibbon(points, width + 0.13, 0x6f4a27, 0);
-      const road = createRoadRibbon(points, width, roadColor(roadType), 0.012);
-      if (outline) roadGroup.add(outline);
-      if (road) roadGroup.add(road);
+      const points = [];
+      for (let i = 0; i < rawPoints.length; i++) {
+        if (i === 0 || rawPoints[i].distanceTo(rawPoints[i - 1]) > 0.08) points.push(rawPoints[i]);
+      }
+      if (points.length < 2) continue;
+      const type = road.tags.highway;
+      const width = type === 'motorway' || type === 'trunk' ? 0.32 : type === 'primary' ? 0.24 : 0.16;
+      const color = roadColor(type);
+      const mesh = createRoadRibbon(points, width, color, 0.05);
+      if (mesh) roadGroup.add(mesh);
     }
     roadGroup.visible = state.showRoads;
     scene.add(roadGroup);
-  }
-
-  function readCachedRoads() {
-    try {
-      const cached = JSON.parse(localStorage.getItem(ROADS_CACHE_KEY));
-      if (cached && Date.now() - cached.savedAt < ROADS_CACHE_AGE && Array.isArray(cached.ways)) return cached.ways;
-    } catch (_) { /* Cache is optional. */ }
-    return null;
-  }
-
-  async function loadRoads() {
-    const cached = readCachedRoads();
-    if (cached) {
-      roadWays = cached;
-      buildRoads();
-      renderState();
-      return;
-    }
-    const query = `[out:json][timeout:25];way[highway~"^(motorway|trunk|primary|secondary)$"](${BOUNDS.south},${BOUNDS.west},${BOUNDS.north},${BOUNDS.east});out geom;`;
-    const endpoints = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
-    for (const endpoint of endpoints) {
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-          body: `data=${encodeURIComponent(query)}`
-        });
-        if (!response.ok) throw new Error(`도로 자료 요청 실패 (${response.status})`);
-        const data = await response.json();
-        roadWays = (data.elements || []).filter((way) => way.type === 'way' && way.geometry && way.geometry.length > 1);
-        try {
-          localStorage.setItem(ROADS_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), ways: roadWays }));
-        } catch (_) { /* The map still works when browser storage is unavailable. */ }
-        buildRoads();
-        renderState();
-        return;
-      } catch (error) {
-        console.warn('OSM 도로 자료를 불러오지 못했습니다.', error);
-      }
-    }
-    showToast('도로 자료를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.');
+    $('#road-legend').hidden = !state.showRoads || !roadWays.length;
   }
 
   function syncMarkers() {
-    if (!scene) return;
-    markerObjects.forEach(({ group, label }) => {
-      scene.remove(group);
-      group.traverse((object) => {
-        if (object.geometry) object.geometry.dispose();
-        if (object.material) object.material.dispose();
-      });
-      label.remove();
-    });
+    for (const item of markerObjects) {
+      disposeObject(item.group);
+      item.label.remove();
+    }
     markerObjects = [];
     markerHits = [];
+    markerLayer.replaceChildren();
+
     for (const marker of state.markers) {
       const { x, z } = worldPosition(marker.lat, marker.lng);
       const y = surfaceHeight(marker.lat, marker.lng);
@@ -849,10 +1060,38 @@
     }
   }
 
+  function rebuildRegionScene() {
+    const r = getRegion();
+
+    // Rebuild ocean
+    if (ocean) disposeObject(ocean);
+    ocean = new THREE.Mesh(
+      new THREE.BoxGeometry(r.oceanBox[0], r.oceanBox[1], r.oceanBox[2]),
+      new THREE.MeshBasicMaterial({ color: 0xc5e1ea, toneMapped: false })
+    );
+    ocean.position.y = -2.05;
+    ocean.receiveShadow = true;
+    scene.add(ocean);
+
+    oceanRim = new THREE.Mesh(
+      new THREE.BoxGeometry(r.oceanRimBox[0], r.oceanRimBox[1], r.oceanRimBox[2]),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 })
+    );
+    oceanRim.position.y = -0.85;
+    ocean.add(oceanRim);
+    ocean.visible = state.showOcean;
+
+    buildIslandBase();
+    buildTerrain();
+    buildRoads();
+    syncMarkers();
+  }
+
   async function initScene() {
-    if (!window.THREE || !THREE.OrbitControls || !Array.isArray(outline) || !window.JEJU_ASSETS) {
-      throw new Error('3D 라이브러리를 불러오지 못했습니다.');
+    if (!window.THREE || !THREE.OrbitControls) {
+      throw new Error('Three.js 라이브러리를 불러오지 못했습니다.');
     }
+
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(42, 1, 0.1, 1000);
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -865,10 +1104,11 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     canvasContainer.append(renderer.domElement);
     resize();
+
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 28;
+    controls.minDistance = 24;
     controls.maxDistance = 420;
     controls.maxPolarAngle = Math.PI * 0.49;
     controls.enablePan = true;
@@ -886,60 +1126,37 @@
     light.shadow.bias = -0.00015;
     scene.add(light);
 
-    ocean = new THREE.Mesh(
-      new THREE.BoxGeometry(118, 1.1, 69),
-      new THREE.MeshBasicMaterial({ color: 0xc5e1ea, toneMapped: false })
-    );
-    ocean.position.y = -2.05;
-    ocean.receiveShadow = true;
-    scene.add(ocean);
-    const oceanRim = new THREE.Mesh(
-      new THREE.BoxGeometry(120, 0.65, 71),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 })
-    );
-    oceanRim.position.y = -0.85;
-    ocean.add(oceanRim);
+    // Prepare initial region assets (Jeju)
+    await prepareRegionAssets('jeju');
 
-    const [image, natural, elevation] = await Promise.all([
-      loadImage(window.JEJU_ASSETS.height),
-      loadTexture(window.JEJU_ASSETS.natural),
-      loadTexture(window.JEJU_ASSETS.elevation)
-    ]);
-    const sourceCanvas = document.createElement('canvas');
-    sourceCanvas.width = image.width;
-    sourceCanvas.height = image.height;
-    const context = sourceCanvas.getContext('2d', { willReadFrequently: true });
-    context.drawImage(image, 0, 0);
-    heightData = { width: image.width, height: image.height, pixels: context.getImageData(0, 0, image.width, image.height).data };
-    textures = { natural, elevation };
-    buildIslandBase();
-    buildTerrain();
-    ocean.visible = state.showOcean;
-    syncMarkers();
+    rebuildRegionScene();
     setView('perspective');
     $('#loading').hidden = true;
-    if (roadWays.length) buildRoads();
     renderState();
-    loadRoads();
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     let pointerStart;
+
     renderer.domElement.addEventListener('pointerdown', (event) => {
       pointerStart = { x: event.clientX, y: event.clientY };
     });
+
     renderer.domElement.addEventListener('pointerup', (event) => {
       if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1,
         -((event.clientY - rect.top) / rect.height) * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
+
       if (pickingLocation) {
+        if (!terrain) return;
         const terrainHit = raycaster.intersectObject(terrain, false)[0];
         if (terrainHit) {
-          const lat = BOUNDS.north - (terrainHit.point.z / MAP_DEPTH + 0.5) * (BOUNDS.north - BOUNDS.south);
-          const lng = BOUNDS.west + (terrainHit.point.x / MAP_WIDTH + 0.5) * (BOUNDS.east - BOUNDS.west);
-          if (pointInIsland(lat, lng)) {
+          const r = getRegion();
+          const lat = r.bounds.north - (terrainHit.point.z / r.mapDepth + 0.5) * (r.bounds.north - r.bounds.south);
+          const lng = r.bounds.west + (terrainHit.point.x / r.mapWidth + 0.5) * (r.bounds.east - r.bounds.west);
+          if (pointInLand(lat, lng)) {
             $('#custom-lat').value = lat.toFixed(5);
             $('#custom-lng').value = lng.toFixed(5);
             $('#add-details').open = true;
@@ -952,14 +1169,17 @@
             return;
           }
         }
-        showToast('제주도 섬 위를 클릭해 주세요.');
+        showToast(`${getRegion().name} 영역 안을 클릭해 주세요.`);
         return;
       }
+
       const hit = raycaster.intersectObjects(markerHits, false)[0];
       if (hit) selectMarker(hit.object.userData.markerId);
     });
+
     window.addEventListener('resize', resize);
     if ('ResizeObserver' in window) new ResizeObserver(resize).observe(viewer);
+
     const animate = (time) => {
       requestAnimationFrame(animate);
       const delta = Math.min(0.05, (time - lastFrameTime) / 1000 || 0);
@@ -975,9 +1195,11 @@
   initUI();
   initScene().catch((error) => {
     const loading = $('#loading');
-    loading.querySelector('.loading-spinner').hidden = true;
-    loading.querySelector('strong').textContent = '3D 지도를 불러오지 못했어요.';
-    loading.querySelector('small').textContent = error.message;
+    if (loading) {
+      loading.querySelector('.loading-spinner').hidden = true;
+      loading.querySelector('strong').textContent = '3D 지도를 불러오지 못했어요.';
+      loading.querySelector('small').textContent = error.message;
+    }
     console.error(error);
   });
 })();

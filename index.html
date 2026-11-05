@@ -3,23 +3,54 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>제주 3D 플래너</title>
-  <link rel="stylesheet" href="jeju-planner.css">
-  <script defer src="vendor/three.min.js"></script>
-  <script defer src="vendor/OrbitControls.js"></script>
-  <script defer src="assets/jeju-outline.js"></script>
-  <script defer src="assets/jeju-textures.js"></script>
-  <script defer src="assets/jeju-roads.js"></script>
-  <script defer src="jeju-planner.js"></script>
+  <title>Jeju Island 3D Planner</title>
+  <meta name="description" content="Interactive 3D Jeju Island terrain and travel planner built with Three.js" />
+  <meta property="og:title" content="Jeju Island 3D Planner" />
+  <meta property="og:description" content="Interactive 3D Jeju Island terrain and travel planner built with Three.js" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="stylesheet" href="/jeju-planner.css">
+  <script defer src="/vendor/three.min.js"></script>
+  <script defer src="/vendor/OrbitControls.js"></script>
+  <script defer src="/assets/jeju-outline.js"></script>
+  <script defer src="/assets/jeju-textures.js"></script>
+  <script defer src="/assets/jeju-roads.js"></script>
+  <script defer src="/assets/haeundae-data.js"></script>
+  <script defer src="/jeju-planner.js"></script>
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
         <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="편집 메뉴 열기" aria-controls="sidebar" aria-expanded="false">☰</button>
-        <span class="brand-mark" aria-hidden="true">J</span>
-        <div class="brand-copy"><strong>JEJU STUDIO</strong><span>나만의 제주도 3D 지도</span></div>
+        <span id="brand-mark" class="brand-mark" aria-hidden="true">J</span>
+        <div class="brand-copy">
+          <strong id="brand-title">JEJU STUDIO</strong>
+          <span id="brand-sub">나만의 제주도 3D 지도</span>
+        </div>
       </div>
+
+      <!-- GNB 주요 관광지 선택 목록 -->
+      <nav class="gnb-destination-nav" aria-label="주요 관광지 선택">
+        <span class="gnb-destination-kicker">관광지 선택</span>
+        <div class="destination-tabs" role="tablist">
+          <button type="button" class="dest-tab is-active" id="tab-dest-jeju" data-region="jeju" role="tab" aria-selected="true" title="제주도 3D 플래너">
+            <span class="dest-tab-icon">🍊</span>
+            <div class="dest-tab-text">
+              <strong>제주도</strong>
+              <small>한라산·성산일출봉</small>
+            </div>
+          </button>
+          <button type="button" class="dest-tab" id="tab-dest-haeundae" data-region="haeundae" role="tab" aria-selected="false" title="부산 해운대 3D 플래너">
+            <span class="dest-tab-icon">🌊</span>
+            <div class="dest-tab-text">
+              <strong>부산 해운대</strong>
+              <small>해수욕장·동백섬</small>
+            </div>
+          </button>
+        </div>
+      </nav>
+
       <div class="topbar-actions">
         <span id="save-status" class="save-status">● 자동 저장</span>
         <button id="open-plan" class="text-button" type="button">지도 열기</button>
@@ -32,9 +63,9 @@
     <main class="workspace">
       <aside id="sidebar" class="sidebar" aria-label="지도 편집 도구">
         <div class="sidebar-intro">
-          <div class="eyebrow"><span class="eyebrow-line"></span> YOUR ISLAND, YOUR MAP</div>
-          <h1>제주를<br>새롭게 살펴보세요.</h1>
-          <p>실제 해안선과 고도를 바탕으로 장소를 고르고, 원하는 시점에서 지도를 완성해 보세요.</p>
+          <div class="eyebrow"><span class="eyebrow-line"></span> <span id="sidebar-eyebrow">YOUR ISLAND, YOUR MAP</span></div>
+          <h1 id="sidebar-title">제주를<br>새롭게 살펴보세요.</h1>
+          <p id="sidebar-desc">실제 해안선과 고도를 바탕으로 장소를 고르고, 원하는 시점에서 지도를 완성해 보세요.</p>
         </div>
 
         <div class="panel-nav" role="tablist" aria-label="편집 단계">
@@ -45,7 +76,7 @@
 
         <div class="sidebar-scroll">
           <section id="panel-places" class="panel" role="tabpanel" aria-labelledby="tab-places">
-            <div class="section-heading"><div><span class="section-kicker">EXPLORE JEJU</span><h2>추천 장소</h2></div><span id="preset-count" class="count-pill">0곳</span></div>
+            <div class="section-heading"><div><span id="sidebar-kicker" class="section-kicker">EXPLORE JEJU</span><h2>추천 장소</h2></div><span id="preset-count" class="count-pill">0곳</span></div>
             <label class="search-field"><span aria-hidden="true">⌕</span><input id="place-search" type="search" placeholder="장소 검색" autocomplete="off" aria-label="추천 장소 검색"></label>
             <div id="preset-list" class="preset-list"></div>
 
@@ -55,7 +86,7 @@
             <details class="add-details" id="add-details">
               <summary><span class="plus-circle">+</span> 내 장소 직접 추가</summary>
               <form id="custom-marker-form" class="custom-form">
-                <label>장소 이름<input id="custom-name" name="name" type="text" maxlength="30" placeholder="예: 나만의 제주 장소" required></label>
+                <label>장소 이름<input id="custom-name" name="name" type="text" maxlength="30" placeholder="예: 나만의 장소" required></label>
                 <button id="pick-location" class="pick-location-button" type="button">⌖ &nbsp;지도에서 위치 고르기</button>
                 <div class="form-row">
                   <label>위도<input id="custom-lat" name="lat" type="number" step="any" min="33.15" max="33.60" placeholder="33.3617" required></label>
@@ -68,7 +99,7 @@
 
           <section id="panel-layers" class="panel" role="tabpanel" aria-labelledby="tab-layers" hidden>
             <div class="section-heading"><div><span class="section-kicker">MAP STYLE</span><h2>지도 스타일</h2></div></div>
-            <p class="panel-lead">한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.</p>
+            <p id="panel-lead-style" class="panel-lead">한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.</p>
             <div class="style-options" role="radiogroup" aria-label="지형 색상">
               <label class="style-option"><input type="radio" name="map-style" value="natural" checked><span class="style-swatch natural-swatch"></span><span><strong>자연색</strong><small>차분한 녹색 지형</small></span><span class="radio-dot"></span></label>
               <label class="style-option"><input type="radio" name="map-style" value="elevation"><span class="style-swatch elevation-swatch"></span><span><strong>고도 강조</strong><small>높이에 따라 달라지는 색</small></span><span class="radio-dot"></span></label>
@@ -98,11 +129,11 @@
         <div id="canvas-container" class="canvas-container"></div>
         <div id="marker-layer" class="marker-layer"></div>
         <div id="road-legend" class="road-legend" hidden><span></span> 주요 도로 · OpenStreetMap</div>
-        <div id="loading" class="loading" role="status"><span class="loading-spinner"></span><strong>제주도를 불러오는 중</strong><small>실제 해안선과 지형을 준비하고 있어요.</small></div>
+        <div id="loading" class="loading" role="status"><span class="loading-spinner"></span><strong id="loading-title">3D 지도를 불러오는 중</strong><small id="loading-sub">실제 해안선과 지형을 준비하고 있어요.</small></div>
 
-        <div class="viewer-title"><span class="viewer-kicker">INTERACTIVE 3D MAP <span class="live-dot"></span> LIVE</span><strong>Jeju Island</strong><span>대한민국 · 북위 33.38°</span></div>
+        <div class="viewer-title"><span class="viewer-kicker">INTERACTIVE 3D MAP <span class="live-dot"></span> LIVE</span><strong id="viewer-region-name">Jeju Island</strong><span id="viewer-region-coord">대한민국 · 북위 33.38°</span></div>
         <div class="viewer-tip">마우스로 돌리고 확대해 보세요 <span aria-hidden="true">↗</span></div>
-        <div id="pick-instruction" class="pick-instruction" hidden>섬 위의 원하는 위치를 클릭하세요. <button id="cancel-pick" type="button">취소</button></div>
+        <div id="pick-instruction" class="pick-instruction" hidden><span id="pick-instruction-text">섬 또는 육지 위의 원하는 위치를 클릭하세요.</span> <button id="cancel-pick" type="button">취소</button></div>
 
         <div class="view-tools" aria-label="지도 보기 도구">
           <button type="button" data-action="perspective" class="tool-button is-active" aria-label="3D 보기" title="3D 보기"><span class="tool-icon">◇</span><small>3D</small></button>
@@ -132,7 +163,7 @@
             <button id="undo" type="button" aria-label="실행 취소" title="실행 취소" disabled>↶</button>
             <button id="redo" type="button" aria-label="다시 실행" title="다시 실행" disabled>↷</button>
           </div>
-          <div class="bottom-summary"><span id="bottom-marker-count">3개의 장소</span><strong>나만의 제주 지도</strong></div>
+          <div class="bottom-summary"><span id="bottom-marker-count">3개의 장소</span><strong id="bottom-summary-title">나만의 3D 지도</strong></div>
           <button id="bottom-save" class="primary-button bottom-save" type="button">지도 저장 <span aria-hidden="true">→</span></button>
         </div>
 
