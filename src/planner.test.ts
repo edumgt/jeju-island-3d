@@ -39,7 +39,10 @@ function cleanState(raw: any, bounds = REGIONS.jeju.bounds) {
     heightScale: Math.min(180, Math.max(40, Number(raw.heightScale) || 100)),
     showLabels: raw.showLabels !== false,
     showOcean: raw.showOcean !== false,
-    showRoads: raw.showRoads !== false
+    showRoads: raw.showRoads !== false,
+    weather: ['rain', 'snow', 'mist'].includes(raw.weather) ? raw.weather : 'clear',
+    weatherIntensity: Math.min(3, Math.max(1, Number(raw.weatherIntensity) || 2)),
+    windEffect: raw.windEffect !== false
   };
 }
 
@@ -94,4 +97,20 @@ test('cleanState clamps heightScale between 40 and 180', () => {
 test('cleanState throws on invalid payload', () => {
   assert.throws(() => cleanState(null), /지도 데이터 형식이 올바르지 않습니다/);
   assert.throws(() => cleanState({ markers: 'not-an-array' }), /지도 데이터 형식이 올바르지 않습니다/);
+});
+
+test('cleanState parses weather effects correctly', () => {
+  const rainState = cleanState({ markers: [], weather: 'rain', weatherIntensity: 3, windEffect: false });
+  assert.equal(rainState.weather, 'rain');
+  assert.equal(rainState.weatherIntensity, 3);
+  assert.equal(rainState.windEffect, false);
+
+  const snowState = cleanState({ markers: [], weather: 'snow', weatherIntensity: 1 });
+  assert.equal(snowState.weather, 'snow');
+  assert.equal(snowState.weatherIntensity, 1);
+  assert.equal(snowState.windEffect, true);
+
+  const invalidWeather = cleanState({ markers: [], weather: 'tornado', weatherIntensity: 99 });
+  assert.equal(invalidWeather.weather, 'clear');
+  assert.equal(invalidWeather.weatherIntensity, 3);
 });

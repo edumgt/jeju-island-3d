@@ -14,6 +14,7 @@
   <script defer src="/vendor/OrbitControls.js"></script>
   <script defer src="/assets/jeju-outline.js"></script>
   <script defer src="/assets/jeju-textures.js"></script>
+  <script defer src="/assets/realistic-terrain.js"></script>
   <script defer src="/assets/jeju-roads.js"></script>
   <script defer src="/assets/haeundae-data.js"></script>
   <script defer src="/jeju-planner.js"></script>
@@ -101,8 +102,8 @@
             <div class="section-heading"><div><span class="section-kicker">MAP STYLE</span><h2>지도 스타일</h2></div></div>
             <p id="panel-lead-style" class="panel-lead">한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.</p>
             <div class="style-options" role="radiogroup" aria-label="지형 색상">
-              <label class="style-option"><input type="radio" name="map-style" value="natural" checked><span class="style-swatch natural-swatch"></span><span><strong>자연색</strong><small>차분한 녹색 지형</small></span><span class="radio-dot"></span></label>
-              <label class="style-option"><input type="radio" name="map-style" value="elevation"><span class="style-swatch elevation-swatch"></span><span><strong>고도 강조</strong><small>높이에 따라 달라지는 색</small></span><span class="radio-dot"></span></label>
+              <label class="style-option"><input type="radio" name="map-style" value="natural" checked><span class="style-swatch natural-swatch"></span><span><strong>실사 위성·자연</strong><small>정밀 항공·위성 실사 지표면</small></span><span class="radio-dot"></span></label>
+              <label class="style-option"><input type="radio" name="map-style" value="elevation"><span class="style-swatch elevation-swatch"></span><span><strong>고도·입체 등고</strong><small>지형 기복과 등고선 입체 표현</small></span><span class="radio-dot"></span></label>
             </div>
             <div class="divider"></div>
             <div class="range-heading"><label for="height-scale">지형 높이 강조</label><strong id="height-value">100%</strong></div>
@@ -110,6 +111,65 @@
             <div class="range-ends"><span>낮게</span><span>높게</span></div>
             <label class="toggle-row"><span><strong>장소 이름 표시</strong><small>지도 위 장소 레이블</small></span><input id="toggle-labels" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
             <label class="toggle-row"><span><strong>바다 표시</strong><small>섬 주변의 푸른 배경</small></span><input id="toggle-ocean" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+
+            <div class="divider"></div>
+            <div class="section-heading"><div><span class="section-kicker">ATMOSPHERE</span><h2>날씨·환경 효과</h2></div></div>
+            <p class="panel-lead">3D 지표면 위에 실시간 비나 눈, 운무 효과를 얹어 생생한 현장감을 더해보세요.</p>
+            <div class="weather-grid" role="radiogroup" aria-label="날씨 효과 선택">
+              <label class="weather-card">
+                <input type="radio" name="weather-mode" value="clear" checked>
+                <span class="weather-card-inner">
+                  <span class="weather-emoji">☀️</span>
+                  <strong>맑음</strong>
+                  <small>화창한 주간</small>
+                </span>
+              </label>
+              <label class="weather-card">
+                <input type="radio" name="weather-mode" value="rain">
+                <span class="weather-card-inner">
+                  <span class="weather-emoji">🌧️</span>
+                  <strong>비</strong>
+                  <small>빗줄기·파문</small>
+                </span>
+              </label>
+              <label class="weather-card">
+                <input type="radio" name="weather-mode" value="snow">
+                <span class="weather-card-inner">
+                  <span class="weather-emoji">❄️</span>
+                  <strong>눈</strong>
+                  <small>흩날리는 설경</small>
+                </span>
+              </label>
+              <label class="weather-card">
+                <input type="radio" name="weather-mode" value="mist">
+                <span class="weather-card-inner">
+                  <span class="weather-emoji">🌫️</span>
+                  <strong>안개</strong>
+                  <small>산정 해무·운해</small>
+                </span>
+              </label>
+            </div>
+
+            <div id="weather-details" class="weather-details">
+              <div class="range-heading">
+                <label for="weather-intensity" id="weather-intensity-label">날씨 강도</label>
+                <strong id="weather-intensity-val">보통</strong>
+              </div>
+              <input id="weather-intensity" class="range-input" type="range" min="1" max="3" step="1" value="2">
+              <div class="range-ends"><span>약하게</span><span>강하게</span></div>
+
+              <label class="toggle-row">
+                <span><strong>바람 효과</strong><small>풍향에 따른 날씨 흩날림</small></span>
+                <input id="toggle-wind" type="checkbox" checked>
+                <span class="switch" aria-hidden="true"></span>
+              </label>
+
+              <label class="toggle-row">
+                <span><strong>환경 오디오 효과</strong><small>빗소리 및 바람소리 (Web Audio)</small></span>
+                <input id="toggle-sound" type="checkbox">
+                <span class="switch" aria-hidden="true"></span>
+              </label>
+            </div>
           </section>
 
           <section id="panel-guide" class="panel" role="tabpanel" aria-labelledby="tab-guide" hidden>
@@ -143,6 +203,8 @@
           <div class="tool-divider"></div>
           <button id="road-toggle" type="button" class="tool-button is-active" aria-label="주요 도로 안내 끄기" aria-pressed="true" title="주요 도로 안내"><span class="tool-icon road-tool-icon">━</span><small>도로</small></button>
           <button id="drone-toggle" type="button" class="tool-button" aria-label="드론 비행 보기 켜기" aria-pressed="false" title="드론 비행 보기"><span class="tool-icon">◉</span><small>드론</small></button>
+          <div class="tool-divider"></div>
+          <button id="weather-quick-toggle" type="button" class="tool-button" aria-label="날씨 효과 변경" title="날씨 효과 전환 (맑음·비·눈·안개)"><span class="tool-icon" id="quick-weather-icon">☀️</span><small id="quick-weather-label">날씨</small></button>
         </div>
 
         <div id="drone-hud" class="drone-hud" hidden><strong>DRONE VIEW <b id="drone-speed">100m</b></strong><span>↑ ↓ 전진 · 후진 · ← → 천천히 선회</span></div>

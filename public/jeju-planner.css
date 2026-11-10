@@ -126,8 +126,8 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .style-option strong, .toggle-row strong { font-size: 12px; }
 .style-option small, .toggle-row small { color: #98a4ae; font-size: 10px; }
 .style-swatch { width: 47px; height: 47px; border-radius: 6px; }
-.natural-swatch { background: radial-gradient(circle at 52% 47%, #bfc6b0 2%, #68997e 31%, #9ebd9a 65%, #e5f1f3 67%); }
-.elevation-swatch { background: radial-gradient(circle at 52% 47%, #b3a8c8 2%, #387c9a 31%, #9ccd9a 65%, #e5f1f3 67%); }
+.natural-swatch { background: radial-gradient(circle at 52% 47%, #64605b 2%, #2d5e35 28%, #568446 54%, #269ea8 67%, #144e78 70%); }
+.elevation-swatch { background: radial-gradient(circle at 52% 47%, #e4d6f4 2%, #9254a6 25%, #d67434 50%, #58ac62 67%, #144e78 70%); }
 .radio-dot { width: 17px; height: 17px; border: 1px solid #ccd7df; border-radius: 50%; margin-right: 3px; }
 .style-option:has(input:checked) .radio-dot { border: 5px solid #1769c1; }
 .divider { height: 1px; background: #e8edf0; margin: 23px 0; }
@@ -142,6 +142,20 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: white; transition: transform .2s; }
 .toggle-row input:checked + .switch { background: #1769c1; }
 .toggle-row input:checked + .switch::after { transform: translateX(14px); }
+
+.weather-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 16px; }
+.weather-card { display: flex; border: 1px solid #e4eaee; border-radius: 10px; background: #ffffff; cursor: pointer; transition: border-color .18s, background .18s, box-shadow .18s; overflow: hidden; }
+.weather-card:hover { border-color: #b8d2ea; background: #fbfdff; }
+.weather-card:has(input:checked) { border-color: #1769c1; background: #f3f8fd; box-shadow: 0 2px 8px rgba(23, 105, 193, .12); }
+.weather-card input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.weather-card-inner { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; padding: 10px 6px; text-align: center; gap: 3px; }
+.weather-emoji { font-size: 22px; line-height: 1.1; margin-bottom: 2px; }
+.weather-card strong { font-size: 12px; color: #233446; font-weight: 800; }
+.weather-card:has(input:checked) strong { color: #0d5aa8; }
+.weather-card small { font-size: 10px; color: #8e9ca8; }
+.weather-details { display: grid; gap: 0; margin-top: 6px; }
+.weather-details.is-hidden { display: none; }
+
 .guide-list { display: grid; gap: 21px; list-style: none; margin: 24px 0; padding: 0; }
 .guide-list li { display: flex; gap: 12px; }
 .guide-list li > span { width: 25px; height: 25px; flex: none; display: grid; place-items: center; border-radius: 50%; background: #e9f2fb; color: #1769c1; font-size: 12px; font-weight: 850; }

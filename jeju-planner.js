@@ -81,7 +81,11 @@
     heightScale: 100,
     showLabels: true,
     showOcean: true,
-    showRoads: true
+    showRoads: true,
+    weather: 'clear',
+    weatherIntensity: 2,
+    windEffect: true,
+    soundEnabled: false
   });
 
   function cleanState(raw, region) {
@@ -111,7 +115,11 @@
       heightScale: Math.min(180, Math.max(40, Number(raw.heightScale) || 100)),
       showLabels: raw.showLabels !== false,
       showOcean: raw.showOcean !== false,
-      showRoads: raw.showRoads !== false
+      showRoads: raw.showRoads !== false,
+      weather: ['rain', 'snow', 'mist'].includes(raw.weather) ? raw.weather : 'clear',
+      weatherIntensity: Math.min(3, Math.max(1, Number(raw.weatherIntensity) || 2)),
+      windEffect: raw.windEffect !== false,
+      soundEnabled: Boolean(raw.soundEnabled)
     };
   }
 
@@ -130,8 +138,20 @@
 
   // Three.js and Scene Variables
   let scene, camera, renderer, controls, terrain, ocean, oceanRim, shoreline, baseMesh, roadGroup;
+  let ambientLight, sunLight;
+  let weatherGroup, rainPoints, splashPoints, snowPoints, mistPoints;
+  let rainGeo, splashGeo, snowGeo, mistGeo;
+  let rainPositions, splashPositions, splashAges, snowPositions, mistPositions;
+  let maxRainCount = 4500;
+  let maxSplashCount = 300;
+  let maxSnowCount = 3500;
+  let maxMistCount = 45;
+  let weatherAudioCtx = null;
+  let rainGain = null;
+  let windGain = null;
+  let ambientNoiseNode = null;
   let regionCaches = {}; // Caches for heightData, textures, outline, roads per region
-  let renderedHeightScale, renderedMapStyle;
+  let renderedHeightScale, renderedMapStyle, renderedWeather;
   let markerObjects = [];
   let markerHits = [];
   let viewMode = 'perspective';
@@ -261,6 +281,13 @@
     return heightAt(lat, lng) * r.heightFactor * state.heightScale / 100;
   }
 
+  function surfaceHeightAtWorld(x, z) {
+    const r = getRegion();
+    const lat = r.bounds.north - (z / r.mapDepth + 0.5) * (r.bounds.north - r.bounds.south);
+    const lng = r.bounds.west + (x / r.mapWidth + 0.5) * (r.bounds.east - r.bounds.west);
+    return surfaceHeight(lat, lng);
+  }
+
   function markerById(id) {
     return state.markers.find((marker) => marker.id === id);
   }
@@ -364,10 +391,26 @@
     $('#road-toggle').setAttribute('aria-label', `주요 도로 안내 ${state.showRoads ? '끄기' : '켜기'}`);
     markerLayer.style.display = state.showLabels && !pickingLocation ? '' : 'none';
 
+    const weatherRadio = $(`input[name="weather-mode"][value="${state.weather}"]`);
+    if (weatherRadio) weatherRadio.checked = true;
+    const weatherIntensityInp = $('#weather-intensity');
+    if (weatherIntensityInp) weatherIntensityInp.value = state.weatherIntensity;
+    const toggleWindInp = $('#toggle-wind');
+    if (toggleWindInp) toggleWindInp.checked = state.windEffect;
+    const toggleSoundInp = $('#toggle-sound');
+    if (toggleSoundInp) toggleSoundInp.checked = state.soundEnabled;
+
+    applyWeatherAtmosphere();
+    updateWeatherAudio();
+
     const cache = regionCaches[currentRegionId];
     if (terrain && cache && cache.textures) {
       if (renderedMapStyle !== state.mapStyle) {
         terrain.material.map = cache.textures[state.mapStyle];
+        if (cache.textures.normal && !terrain.material.normalMap) {
+          terrain.material.normalMap = cache.textures.normal;
+          terrain.material.normalScale.set(1.15, 1.15);
+        }
         terrain.material.needsUpdate = true;
         renderedMapStyle = state.mapStyle;
       }
@@ -688,6 +731,49 @@
     });
     $('#toggle-labels').addEventListener('change', (event) => commit(() => { state.showLabels = event.target.checked; }));
     $('#toggle-ocean').addEventListener('change', (event) => commit(() => { state.showOcean = event.target.checked; }));
+
+    document.querySelectorAll('input[name="weather-mode"]').forEach((radio) => {
+      radio.addEventListener('change', (event) => {
+        commit(() => { state.weather = event.target.value; });
+        const names = { clear: '맑음', rain: '비', snow: '눈', mist: '안개' };
+        showToast(`날씨: ${names[event.target.value] || event.target.value}`);
+      });
+    });
+    const weatherIntensityInput = $('#weather-intensity');
+    if (weatherIntensityInput) {
+      weatherIntensityInput.addEventListener('input', (event) => {
+        const intLabels = { 1: '약하게', 2: '보통', 3: '강하게' };
+        const label = $('#weather-intensity-val');
+        if (label) label.textContent = intLabels[event.target.value] || '보통';
+      });
+      weatherIntensityInput.addEventListener('change', (event) => {
+        commit(() => { state.weatherIntensity = Number(event.target.value); });
+      });
+    }
+    const toggleWind = $('#toggle-wind');
+    if (toggleWind) {
+      toggleWind.addEventListener('change', (event) => {
+        commit(() => { state.windEffect = event.target.checked; });
+      });
+    }
+    const toggleSound = $('#toggle-sound');
+    if (toggleSound) {
+      toggleSound.addEventListener('change', (event) => {
+        commit(() => { state.soundEnabled = event.target.checked; });
+        if (event.target.checked) showToast('환경 효과음을 켰어요.');
+      });
+    }
+    const quickWeatherBtn = $('#weather-quick-toggle');
+    if (quickWeatherBtn) {
+      quickWeatherBtn.addEventListener('click', () => {
+        const order = ['clear', 'rain', 'snow', 'mist'];
+        const next = order[(order.indexOf(state.weather) + 1) % order.length];
+        commit(() => { state.weather = next; });
+        const names = { clear: '맑음', rain: '비', snow: '눈', mist: '안개' };
+        showToast(`날씨 효과: ${names[next]}`);
+      });
+    }
+
     $('#road-toggle').addEventListener('click', () => commit(() => { state.showRoads = !state.showRoads; }));
     $('#drone-toggle').addEventListener('click', () => setDroneMode(!droneMode));
     window.addEventListener('keydown', (event) => {
@@ -776,26 +862,45 @@
     if (regionCaches[regionId]) return regionCaches[regionId];
 
     if (regionId === 'jeju') {
-      const [image, natural, elevation] = await Promise.all([
-        loadImage(window.JEJU_ASSETS.height),
-        loadTexture(window.JEJU_ASSETS.natural),
-        loadTexture(window.JEJU_ASSETS.elevation)
-      ]);
+      const image = await loadImage(window.JEJU_ASSETS.height);
       const sourceCanvas = document.createElement('canvas');
       sourceCanvas.width = image.width;
       sourceCanvas.height = image.height;
       const context = sourceCanvas.getContext('2d', { willReadFrequently: true });
       context.drawImage(image, 0, 0);
       const heightData = { width: image.width, height: image.height, pixels: context.getImageData(0, 0, image.width, image.height).data };
+
+      let natural, elevation, normal;
+      if (typeof window.createRealisticJejuAssets === 'function') {
+        const { naturalCanvas, elevationCanvas, normalCanvas } = window.createRealisticJejuAssets(sourceCanvas, window.JEJU_OUTLINE);
+        natural = new THREE.CanvasTexture(naturalCanvas);
+        natural.encoding = THREE.sRGBEncoding;
+        natural.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+        elevation = new THREE.CanvasTexture(elevationCanvas);
+        elevation.encoding = THREE.sRGBEncoding;
+        elevation.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+        normal = new THREE.CanvasTexture(normalCanvas);
+        normal.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      } else {
+        const [oldNat, oldElev] = await Promise.all([
+          loadTexture(window.JEJU_ASSETS.natural),
+          loadTexture(window.JEJU_ASSETS.elevation)
+        ]);
+        natural = oldNat;
+        elevation = oldElev;
+      }
+
       regionCaches.jeju = {
         heightData,
-        textures: { natural, elevation }
+        textures: { natural, elevation, normal }
       };
     } else if (regionId === 'haeundae') {
       if (typeof window.createHaeundaeAssets !== 'function') {
         throw new Error('해운대 3D 에셋 생성기를 찾을 수 없습니다.');
       }
-      const { heightCanvas, naturalCanvas, elevationCanvas } = window.createHaeundaeAssets();
+      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas } = window.createHaeundaeAssets();
       const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
       const heightData = {
         width: heightCanvas.width,
@@ -811,9 +916,15 @@
       elevation.encoding = THREE.sRGBEncoding;
       elevation.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
+      let normal;
+      if (normalCanvas) {
+        normal = new THREE.CanvasTexture(normalCanvas);
+        normal.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      }
+
       regionCaches.haeundae = {
         heightData,
-        textures: { natural, elevation }
+        textures: { natural, elevation, normal }
       };
     }
 
@@ -850,8 +961,8 @@
     const geometry = new THREE.ExtrudeGeometry(shape, { depth: 1.45, bevelEnabled: false, steps: 1 });
     geometry.rotateX(Math.PI / 2);
     baseMesh = new THREE.Mesh(geometry, [
-      new THREE.MeshStandardMaterial({ color: 0xcdd9c5, roughness: 1 }),
-      new THREE.MeshStandardMaterial({ color: 0xe0e8dc, roughness: 1 })
+      new THREE.MeshStandardMaterial({ color: 0x363a38, roughness: 0.9, metalness: 0.05 }), // basalt rock cliff
+      new THREE.MeshStandardMaterial({ color: 0x48504c, roughness: 0.85, metalness: 0.05 })
     ]);
     baseMesh.castShadow = true;
     baseMesh.receiveShadow = true;
@@ -863,7 +974,7 @@
     });
     shoreline = new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({ color: 0xf2f4e8, transparent: true, opacity: 0.7 })
+      new THREE.LineBasicMaterial({ color: 0xf5fbfb, transparent: true, opacity: 0.85 })
     );
     scene.add(shoreline);
   }
@@ -899,16 +1010,21 @@
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
 
-    terrain = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+    const matOptions = {
       map: cache.textures[state.mapStyle],
       transparent: true,
       alphaTest: 0.08,
       side: THREE.DoubleSide,
-      roughness: 0.94,
-      metalness: 0,
+      roughness: 0.82,
+      metalness: 0.04,
       polygonOffset: true,
       polygonOffsetFactor: -1
-    }));
+    };
+    if (cache.textures.normal) {
+      matOptions.normalMap = cache.textures.normal;
+      matOptions.normalScale = new THREE.Vector2(1.15, 1.15);
+    }
+    terrain = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial(matOptions));
     terrain.receiveShadow = true;
     scene.add(terrain);
     renderedMapStyle = state.mapStyle;
@@ -1060,14 +1176,450 @@
     }
   }
 
+  function createRainTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, 64);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    grad.addColorStop(0.3, 'rgba(215, 238, 255, 0.45)');
+    grad.addColorStop(0.85, 'rgba(255, 255, 255, 0.95)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0.2)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.rect(6, 0, 4, 64);
+    ctx.fill();
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  function createSplashTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = 'rgba(230, 245, 255, 0.8)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(32, 32, 20, 0, Math.PI * 2);
+    ctx.stroke();
+    const grad = ctx.createRadialGradient(32, 32, 4, 32, 32, 16);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  function createSnowTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    grad.addColorStop(0.35, 'rgba(240, 248, 255, 0.85)');
+    grad.addColorStop(0.7, 'rgba(230, 242, 255, 0.35)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(32, 32, 30, 0, Math.PI * 2);
+    ctx.fill();
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  function createMistTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    const centers = [[64, 64, 48], [44, 52, 36], [82, 54, 38], [56, 78, 40], [74, 76, 38]];
+    for (const [cx, cy, r] of centers) {
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      grad.addColorStop(0, 'rgba(245, 250, 255, 0.45)');
+      grad.addColorStop(0.5, 'rgba(235, 245, 255, 0.22)');
+      grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  function buildWeatherSystems() {
+    if (weatherGroup) disposeObject(weatherGroup);
+    weatherGroup = new THREE.Group();
+    scene.add(weatherGroup);
+
+    const r = getRegion();
+
+    // 1. Rain System
+    rainGeo = new THREE.BufferGeometry();
+    rainPositions = new Float32Array(maxRainCount * 3);
+    for (let i = 0; i < maxRainCount; i++) {
+      rainPositions[i * 3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+      rainPositions[i * 3 + 1] = Math.random() * 55;
+      rainPositions[i * 3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+    }
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPositions, 3));
+    const rainMat = new THREE.PointsMaterial({
+      size: 2.1,
+      map: createRainTexture(),
+      transparent: true,
+      opacity: 0.68,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    rainPoints = new THREE.Points(rainGeo, rainMat);
+    weatherGroup.add(rainPoints);
+
+    // 2. Ground Splash System
+    splashGeo = new THREE.BufferGeometry();
+    splashPositions = new Float32Array(maxSplashCount * 3);
+    splashAges = new Float32Array(maxSplashCount);
+    for (let i = 0; i < maxSplashCount; i++) {
+      splashPositions[i * 3] = 0;
+      splashPositions[i * 3 + 1] = -100;
+      splashPositions[i * 3 + 2] = 0;
+      splashAges[i] = 1.0;
+    }
+    splashGeo.setAttribute('position', new THREE.BufferAttribute(splashPositions, 3));
+    const splashMat = new THREE.PointsMaterial({
+      size: 2.6,
+      map: createSplashTexture(),
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    splashPoints = new THREE.Points(splashGeo, splashMat);
+    weatherGroup.add(splashPoints);
+
+    // 3. Snow System
+    snowGeo = new THREE.BufferGeometry();
+    snowPositions = new Float32Array(maxSnowCount * 3);
+    for (let i = 0; i < maxSnowCount; i++) {
+      snowPositions[i * 3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+      snowPositions[i * 3 + 1] = Math.random() * 55;
+      snowPositions[i * 3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+    }
+    snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
+    const snowMat = new THREE.PointsMaterial({
+      size: 2.3,
+      map: createSnowTexture(),
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false
+    });
+    snowPoints = new THREE.Points(snowGeo, snowMat);
+    weatherGroup.add(snowPoints);
+
+    // 4. Mist System
+    mistGeo = new THREE.BufferGeometry();
+    mistPositions = new Float32Array(maxMistCount * 3);
+    for (let i = 0; i < maxMistCount; i++) {
+      mistPositions[i * 3] = (Math.random() - 0.5) * r.mapWidth * 1.1;
+      mistPositions[i * 3 + 1] = 6 + Math.random() * 18;
+      mistPositions[i * 3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.1;
+    }
+    mistGeo.setAttribute('position', new THREE.BufferAttribute(mistPositions, 3));
+    const mistMat = new THREE.PointsMaterial({
+      size: 32.0,
+      map: createMistTexture(),
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false
+    });
+    mistPoints = new THREE.Points(mistGeo, mistMat);
+    weatherGroup.add(mistPoints);
+
+    applyWeatherAtmosphere();
+  }
+
+  function resetWeatherBounds() {
+    const r = getRegion();
+    if (!rainPositions || !snowPositions || !mistPositions) return;
+    for (let i = 0; i < maxRainCount; i++) {
+      rainPositions[i * 3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+      rainPositions[i * 3 + 1] = Math.random() * 55;
+      rainPositions[i * 3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+    }
+    if (rainGeo) rainGeo.attributes.position.needsUpdate = true;
+    for (let i = 0; i < maxSnowCount; i++) {
+      snowPositions[i * 3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+      snowPositions[i * 3 + 1] = Math.random() * 55;
+      snowPositions[i * 3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+    }
+    if (snowGeo) snowGeo.attributes.position.needsUpdate = true;
+    for (let i = 0; i < maxMistCount; i++) {
+      mistPositions[i * 3] = (Math.random() - 0.5) * r.mapWidth * 1.1;
+      mistPositions[i * 3 + 1] = 6 + Math.random() * 18;
+      mistPositions[i * 3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.1;
+    }
+    if (mistGeo) mistGeo.attributes.position.needsUpdate = true;
+  }
+
+  function applyWeatherAtmosphere() {
+    if (!renderer || !scene) return;
+    const mode = state.weather || 'clear';
+    const intensity = state.weatherIntensity || 2;
+
+    if (rainPoints) rainPoints.visible = (mode === 'rain');
+    if (splashPoints) splashPoints.visible = (mode === 'rain');
+    if (snowPoints) snowPoints.visible = (mode === 'snow');
+    if (mistPoints) mistPoints.visible = (mode === 'mist');
+
+    const quickIcon = $('#quick-weather-icon');
+    const quickLabel = $('#quick-weather-label');
+    const quickBtn = $('#weather-quick-toggle');
+    const weatherInfo = {
+      clear: { icon: '☀️', label: '맑음', clearColor: 0xeef5f8, fogNear: 140, fogFar: 460, sunColor: 0xfff8ee, sunInt: 0.95, ambSky: 0xdcf0fb, ambGnd: 0x6e7b75, ambInt: 0.76 },
+      rain: { icon: '🌧️', label: '비', clearColor: 0x93a5b0, fogNear: 55, fogFar: 220, sunColor: 0xafc4d2, sunInt: 0.38 + intensity * 0.04, ambSky: 0x889da9, ambGnd: 0x4f5c63, ambInt: 0.65 },
+      snow: { icon: '❄️', label: '눈', clearColor: 0xd8e3ea, fogNear: 70, fogFar: 250, sunColor: 0xecf3f7, sunInt: 0.72, ambSky: 0xd1dfe7, ambGnd: 0x83939c, ambInt: 0.85 },
+      mist: { icon: '🌫️', label: '안개', clearColor: 0xc4d6df, fogNear: 25, fogFar: 160, sunColor: 0xf6ede0, sunInt: 0.52, ambSky: 0xb5c8d2, ambGnd: 0x687880, ambInt: 0.78 }
+    };
+    const current = weatherInfo[mode] || weatherInfo.clear;
+
+    if (quickIcon) quickIcon.textContent = current.icon;
+    if (quickLabel) quickLabel.textContent = current.label;
+    if (quickBtn) quickBtn.classList.toggle('is-active', mode !== 'clear');
+
+    const intLabels = { 1: '약하게', 2: '보통', 3: '강하게' };
+    const intValElem = $('#weather-intensity-val');
+    if (intValElem) intValElem.textContent = intLabels[intensity] || '보통';
+
+    renderer.setClearColor(current.clearColor, 1);
+    if (!scene.fog) {
+      scene.fog = new THREE.Fog(current.clearColor, current.fogNear, current.fogFar);
+    } else {
+      scene.fog.color.setHex(current.clearColor);
+      scene.fog.near = current.fogNear;
+      scene.fog.far = current.fogFar;
+    }
+
+    if (sunLight) {
+      sunLight.color.setHex(current.sunColor);
+      sunLight.intensity = current.sunInt;
+    }
+    if (ambientLight) {
+      ambientLight.color.setHex(current.ambSky);
+      ambientLight.groundColor.setHex(current.ambGnd);
+      ambientLight.intensity = current.ambInt;
+    }
+  }
+
+  let nextSplashIndex = 0;
+  function triggerSplash(x, y, z) {
+    if (!splashPositions || !splashAges) return;
+    const idx = nextSplashIndex % maxSplashCount;
+    nextSplashIndex++;
+    splashPositions[idx * 3] = x;
+    splashPositions[idx * 3 + 1] = y + 0.12;
+    splashPositions[idx * 3 + 2] = z;
+    splashAges[idx] = 0;
+  }
+
+  function updateWeather(delta, time) {
+    if (!state.weather || state.weather === 'clear') return;
+    const r = getRegion();
+    const intensity = state.weatherIntensity || 2;
+    const wind = state.windEffect !== false;
+
+    if (state.weather === 'rain') {
+      const activeCount = intensity === 1 ? 1600 : intensity === 2 ? 3000 : maxRainCount;
+      const speed = (58 + intensity * 6) * delta;
+      const windX = wind ? 6.5 * delta : 0;
+      const windZ = wind ? -3.5 * delta : 0;
+      const halfW = r.mapWidth * 0.68;
+      const halfD = r.mapDepth * 0.68;
+
+      for (let i = 0; i < activeCount; i++) {
+        const i3 = i * 3;
+        rainPositions[i3 + 1] -= speed;
+        rainPositions[i3] += windX;
+        rainPositions[i3 + 2] += windZ;
+
+        const x = rainPositions[i3];
+        const z = rainPositions[i3 + 2];
+        const y = rainPositions[i3 + 1];
+
+        if (x < -halfW || x > halfW || z < -halfD || z > halfD) {
+          rainPositions[i3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+          rainPositions[i3 + 1] = 46 + Math.random() * 8;
+          rainPositions[i3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+          continue;
+        }
+
+        const groundY = surfaceHeightAtWorld(x, z);
+        if (y <= groundY || y <= 0) {
+          if ((i % 14) === 0) {
+            triggerSplash(x, Math.max(0, groundY), z);
+          }
+          rainPositions[i3 + 1] = 45 + Math.random() * 8;
+          rainPositions[i3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+          rainPositions[i3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+        }
+      }
+      rainGeo.attributes.position.needsUpdate = true;
+
+      let splashUpdated = false;
+      for (let s = 0; s < maxSplashCount; s++) {
+        if (splashAges[s] < 1.0) {
+          splashAges[s] += delta * 3.5;
+          if (splashAges[s] >= 1.0) {
+            splashPositions[s * 3 + 1] = -100;
+          }
+          splashUpdated = true;
+        }
+      }
+      if (splashUpdated) splashGeo.attributes.position.needsUpdate = true;
+    } else if (state.weather === 'snow') {
+      const activeCount = intensity === 1 ? 1200 : intensity === 2 ? 2400 : maxSnowCount;
+      const speed = (9 + intensity * 2.2) * delta;
+      const baseWindX = wind ? 3.5 * delta : 0.6 * delta;
+      const halfW = r.mapWidth * 0.68;
+      const halfD = r.mapDepth * 0.68;
+
+      for (let i = 0; i < activeCount; i++) {
+        const i3 = i * 3;
+        const drift = Math.sin(time * 1.6 + i * 0.08) * 1.5 * delta;
+        const driftZ = Math.cos(time * 1.2 + i * 0.12) * 1.2 * delta;
+
+        snowPositions[i3 + 1] -= speed;
+        snowPositions[i3] += baseWindX + drift;
+        snowPositions[i3 + 2] += driftZ;
+
+        const x = snowPositions[i3];
+        const z = snowPositions[i3 + 2];
+        const y = snowPositions[i3 + 1];
+
+        if (x < -halfW || x > halfW || z < -halfD || z > halfD) {
+          snowPositions[i3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+          snowPositions[i3 + 1] = 48 + Math.random() * 8;
+          snowPositions[i3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+          continue;
+        }
+
+        const groundY = surfaceHeightAtWorld(x, z);
+        if (y <= groundY || y <= 0) {
+          snowPositions[i3 + 1] = 48 + Math.random() * 8;
+          snowPositions[i3] = (Math.random() - 0.5) * r.mapWidth * 1.35;
+          snowPositions[i3 + 2] = (Math.random() - 0.5) * r.mapDepth * 1.35;
+        }
+      }
+      snowGeo.attributes.position.needsUpdate = true;
+    } else if (state.weather === 'mist') {
+      for (let i = 0; i < maxMistCount; i++) {
+        const i3 = i * 3;
+        mistPositions[i3] += Math.sin(time * 0.2 + i) * 1.4 * delta;
+        mistPositions[i3 + 2] += Math.cos(time * 0.15 + i * 0.7) * 0.9 * delta;
+      }
+      mistGeo.attributes.position.needsUpdate = true;
+    }
+  }
+
+  function updateWeatherAudio() {
+    if (!state.soundEnabled || state.weather === 'clear') {
+      if (rainGain && weatherAudioCtx) {
+        rainGain.gain.setTargetAtTime(0, weatherAudioCtx.currentTime, 0.25);
+      }
+      if (windGain && weatherAudioCtx) {
+        windGain.gain.setTargetAtTime(0, weatherAudioCtx.currentTime, 0.25);
+      }
+      return;
+    }
+
+    try {
+      if (!weatherAudioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        weatherAudioCtx = new AudioContextClass();
+      }
+
+      if (weatherAudioCtx.state === 'suspended') {
+        weatherAudioCtx.resume();
+      }
+
+      if (!ambientNoiseNode) {
+        const bufferSize = weatherAudioCtx.sampleRate * 2;
+        const noiseBuffer = weatherAudioCtx.createBuffer(1, bufferSize, weatherAudioCtx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + white * 0.0555179;
+          b1 = 0.99332 * b1 + white * 0.0750759;
+          b2 = 0.96900 * b2 + white * 0.1538520;
+          b3 = 0.86650 * b3 + white * 0.3104856;
+          b4 = 0.55000 * b4 + white * 0.5329522;
+          b5 = -0.7616 * b5 - white * 0.0168980;
+          output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+          b6 = white * 0.115926;
+        }
+        ambientNoiseNode = weatherAudioCtx.createBufferSource();
+        ambientNoiseNode.buffer = noiseBuffer;
+        ambientNoiseNode.loop = true;
+
+        const rainFilter = weatherAudioCtx.createBiquadFilter();
+        rainFilter.type = 'bandpass';
+        rainFilter.frequency.value = 1600;
+        rainFilter.Q.value = 0.8;
+
+        rainGain = weatherAudioCtx.createGain();
+        rainGain.gain.value = 0;
+
+        const windFilter = weatherAudioCtx.createBiquadFilter();
+        windFilter.type = 'lowpass';
+        windFilter.frequency.value = 450;
+        windFilter.Q.value = 3.5;
+
+        windGain = weatherAudioCtx.createGain();
+        windGain.gain.value = 0;
+
+        ambientNoiseNode.connect(rainFilter);
+        rainFilter.connect(rainGain);
+        rainGain.connect(weatherAudioCtx.destination);
+
+        ambientNoiseNode.connect(windFilter);
+        windFilter.connect(windGain);
+        windGain.connect(weatherAudioCtx.destination);
+
+        ambientNoiseNode.start();
+      }
+
+      const intensity = state.weatherIntensity || 2;
+      const targetTime = weatherAudioCtx.currentTime;
+
+      if (state.weather === 'rain') {
+        const rainVol = (0.05 + intensity * 0.035);
+        const windVol = (state.windEffect ? 0.02 * intensity : 0.005);
+        rainGain.gain.setTargetAtTime(rainVol, targetTime, 0.3);
+        windGain.gain.setTargetAtTime(windVol, targetTime, 0.3);
+      } else if (state.weather === 'snow') {
+        const windVol = (0.04 + intensity * 0.03);
+        rainGain.gain.setTargetAtTime(0, targetTime, 0.2);
+        windGain.gain.setTargetAtTime(windVol, targetTime, 0.3);
+      } else if (state.weather === 'mist') {
+        rainGain.gain.setTargetAtTime(0, targetTime, 0.2);
+        windGain.gain.setTargetAtTime(0.015, targetTime, 0.3);
+      } else {
+        rainGain.gain.setTargetAtTime(0, targetTime, 0.2);
+        windGain.gain.setTargetAtTime(0, targetTime, 0.2);
+      }
+    } catch (e) {
+      console.warn('Weather audio not started:', e);
+    }
+  }
+
   function rebuildRegionScene() {
     const r = getRegion();
 
-    // Rebuild ocean
+    // Rebuild ocean with deep coastal water PBR material
     if (ocean) disposeObject(ocean);
     ocean = new THREE.Mesh(
       new THREE.BoxGeometry(r.oceanBox[0], r.oceanBox[1], r.oceanBox[2]),
-      new THREE.MeshBasicMaterial({ color: 0xc5e1ea, toneMapped: false })
+      new THREE.MeshStandardMaterial({ color: 0x144e78, roughness: 0.28, metalness: 0.12, toneMapped: true })
     );
     ocean.position.y = -2.05;
     ocean.receiveShadow = true;
@@ -1075,7 +1627,7 @@
 
     oceanRim = new THREE.Mesh(
       new THREE.BoxGeometry(r.oceanRimBox[0], r.oceanRimBox[1], r.oceanRimBox[2]),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 })
+      new THREE.MeshStandardMaterial({ color: 0x226b9c, roughness: 0.45, metalness: 0.08 })
     );
     oceanRim.position.y = -0.85;
     ocean.add(oceanRim);
@@ -1085,6 +1637,7 @@
     buildTerrain();
     buildRoads();
     syncMarkers();
+    resetWeatherBounds();
   }
 
   async function initScene() {
@@ -1096,10 +1649,10 @@
     camera = new THREE.PerspectiveCamera(42, 1, 0.1, 1000);
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setClearColor(0xf2f8f8, 0);
+    renderer.setClearColor(0xeef5f8, 1);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.12;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     canvasContainer.append(renderer.domElement);
@@ -1113,18 +1666,22 @@
     controls.maxPolarAngle = Math.PI * 0.49;
     controls.enablePan = true;
 
-    const ambient = new THREE.HemisphereLight(0xffffff, 0xb5c5c8, 0.82);
-    scene.add(ambient);
-    const light = new THREE.DirectionalLight(0xffffff, 0.78);
-    light.position.set(-35, 85, 45);
-    light.castShadow = true;
-    light.shadow.mapSize.set(2048, 2048);
-    light.shadow.camera.left = -85;
-    light.shadow.camera.right = 85;
-    light.shadow.camera.top = 85;
-    light.shadow.camera.bottom = -85;
-    light.shadow.bias = -0.00015;
-    scene.add(light);
+    // Warm sun key light and cool sky hemisphere fill
+    ambientLight = new THREE.HemisphereLight(0xdcf0fb, 0x6e7b75, 0.76);
+    scene.add(ambientLight);
+    sunLight = new THREE.DirectionalLight(0xfff8ee, 0.95);
+    sunLight.position.set(-35, 85, 45);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(2048, 2048);
+    sunLight.shadow.camera.left = -85;
+    sunLight.shadow.camera.right = 85;
+    sunLight.shadow.camera.top = 85;
+    sunLight.shadow.camera.bottom = -85;
+    sunLight.shadow.bias = -0.00015;
+    scene.add(sunLight);
+
+    // Build weather systems
+    buildWeatherSystems();
 
     // Prepare initial region assets (Jeju)
     await prepareRegionAssets('jeju');
@@ -1187,6 +1744,7 @@
       updateDroneFlight(delta);
       if (!droneMode) controls.update();
       updateLabels();
+      updateWeather(delta, time);
       renderer.render(scene, camera);
     };
     animate();
