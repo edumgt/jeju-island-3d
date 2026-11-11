@@ -12,11 +12,13 @@
   <link rel="stylesheet" href="/jeju-planner.css">
   <script defer src="/vendor/three.min.js"></script>
   <script defer src="/vendor/OrbitControls.js"></script>
+  <script defer src="/vendor/d3.min.js"></script>
   <script defer src="/assets/jeju-outline.js"></script>
   <script defer src="/assets/jeju-textures.js"></script>
   <script defer src="/assets/realistic-terrain.js"></script>
   <script defer src="/assets/jeju-roads.js"></script>
   <script defer src="/assets/haeundae-data.js"></script>
+  <script defer src="/assets/incheon-data.js"></script>
   <script defer src="/jeju-planner.js"></script>
 </head>
 <body>
@@ -47,6 +49,13 @@
             <div class="dest-tab-text">
               <strong>부산 해운대</strong>
               <small>해수욕장·동백섬</small>
+            </div>
+          </button>
+          <button type="button" class="dest-tab" id="tab-dest-incheon" data-region="incheon" role="tab" aria-selected="false" title="인천·인천대교·인천공항 3D 플래너">
+            <span class="dest-tab-icon">✈️</span>
+            <div class="dest-tab-text">
+              <strong>인천</strong>
+              <small>인천공항·인천대교·송도</small>
             </div>
           </button>
         </div>
@@ -170,6 +179,71 @@
                 <span class="switch" aria-hidden="true"></span>
               </label>
             </div>
+
+            <div class="divider"></div>
+
+            <div class="section-heading">
+              <div>
+                <span class="section-kicker">SOLAR & DAYLIGHT</span>
+                <h2>일조·태양 주기 조명</h2>
+              </div>
+            </div>
+            <p class="panel-lead">선택한 위치와 날짜를 기반으로 일출·일몰 및 실시간 태양 궤적 조명을 시뮬레이션합니다.</p>
+
+            <div class="solar-panel-card">
+              <div class="solar-header">
+                <div class="solar-date-wrap">
+                  <label for="solar-date" class="solar-label">기준 일자</label>
+                  <input type="date" id="solar-date" class="solar-date-input" value="2026-11-10">
+                </div>
+                <button type="button" id="solar-now-btn" class="solar-now-button" title="현재 시각으로 동기화">⏱ 현재 시각</button>
+              </div>
+
+              <div class="solar-time-row">
+                <div class="solar-time-display">
+                  <span id="solar-time-clock" class="solar-clock">17:15</span>
+                  <span id="solar-phase-badge" class="solar-badge sunset-badge">🌇 일몰·골든아워</span>
+                </div>
+                <div class="solar-controls">
+                  <button type="button" id="solar-play-btn" class="solar-play-button" title="태양 궤적 24시간 재생">▶ 재생</button>
+                  <select id="solar-speed" class="solar-speed-select" aria-label="재생 속도">
+                    <option value="1">1배속</option>
+                    <option value="10" selected>10배속</option>
+                    <option value="60">60배속</option>
+                  </select>
+                </div>
+              </div>
+
+              <input id="solar-time-slider" class="range-input solar-slider" type="range" min="0" max="1439" step="1" value="1035" aria-label="시간대 조절">
+              <div class="range-ends"><span>00:00 (밤)</span><span>12:00 (정오)</span><span>23:59 (밤)</span></div>
+
+              <div class="solar-presets">
+                <button type="button" class="solar-preset-chip" data-solar-preset="sunrise">🌅 일출</button>
+                <button type="button" class="solar-preset-chip" data-solar-preset="noon">☀️ 정오</button>
+                <button type="button" class="solar-preset-chip" data-solar-preset="golden">🌇 골든아워</button>
+                <button type="button" class="solar-preset-chip" data-solar-preset="sunset">🌆 일몰</button>
+                <button type="button" class="solar-preset-chip" data-solar-preset="night">🌃 밤</button>
+              </div>
+
+              <div class="solar-ephemeris-grid">
+                <div class="ephem-item">
+                  <span class="ephem-label">일출 시각</span>
+                  <strong id="solar-sunrise-val">07:08</strong>
+                </div>
+                <div class="ephem-item">
+                  <span class="ephem-label">일몰 시각</span>
+                  <strong id="solar-sunset-val">17:24</strong>
+                </div>
+                <div class="ephem-item">
+                  <span class="ephem-label">태양 고도</span>
+                  <strong id="solar-alt-val">12.4°</strong>
+                </div>
+                <div class="ephem-item">
+                  <span class="ephem-label">방위각</span>
+                  <strong id="solar-az-val">235.8°</strong>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section id="panel-guide" class="panel" role="tabpanel" aria-labelledby="tab-guide" hidden>
@@ -205,6 +279,50 @@
           <button id="drone-toggle" type="button" class="tool-button" aria-label="드론 비행 보기 켜기" aria-pressed="false" title="드론 비행 보기"><span class="tool-icon">◉</span><small>드론</small></button>
           <div class="tool-divider"></div>
           <button id="weather-quick-toggle" type="button" class="tool-button" aria-label="날씨 효과 변경" title="날씨 효과 전환 (맑음·비·눈·안개)"><span class="tool-icon" id="quick-weather-icon">☀️</span><small id="quick-weather-label">날씨</small></button>
+          <button id="elevation-toggle" type="button" class="tool-button" aria-label="D3.js 고도 프로필 차트 열기" aria-pressed="false" title="D3.js 지형 고도 프로필 단면도"><span class="tool-icon">📊</span><small>고도</small></button>
+        </div>
+
+        <!-- D3.js Elevation Profile Overlay Panel -->
+        <div id="elevation-profile-panel" class="elevation-profile-panel" hidden>
+          <div class="elev-panel-header">
+            <div class="elev-title-wrap">
+              <span class="elev-kicker">D3.js TOPOGRAPHIC ELEVATION PROFILE</span>
+              <strong id="elev-chart-title">지형 고도 프로필 단면도</strong>
+            </div>
+            <div class="elev-panel-modes" role="tablist" aria-label="단면 기준 선택">
+              <button type="button" class="elev-mode-btn is-active" data-transect="west-east" title="서-동 횡단면">서 ↔ 동 단면</button>
+              <button type="button" class="elev-mode-btn" data-transect="north-south" title="북-남 종단면">북 ↔ 남 단면</button>
+              <button type="button" class="elev-mode-btn" data-transect="places-route" title="내 장소 연결 경로 단면">장소 연결 경로</button>
+            </div>
+            <div class="elev-panel-actions">
+              <button type="button" id="elev-close-btn" class="elev-close-btn" aria-label="고도 프로필 닫기">×</button>
+            </div>
+          </div>
+
+          <div class="elev-stats-bar">
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">최고 고도</span>
+              <strong id="elev-stat-max">0m</strong>
+              <small id="elev-stat-max-name"></small>
+            </div>
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">최저 고도</span>
+              <strong id="elev-stat-min">0m</strong>
+            </div>
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">총 단면 거리</span>
+              <strong id="elev-stat-dist">0 km</strong>
+            </div>
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">평균 경사도</span>
+              <strong id="elev-stat-slope">0%</strong>
+            </div>
+          </div>
+
+          <div class="elev-chart-container" id="elev-chart-container">
+            <svg id="elevation-chart-svg" class="elevation-chart-svg"></svg>
+            <div id="elev-chart-tooltip" class="elev-chart-tooltip" hidden></div>
+          </div>
         </div>
 
         <div id="drone-hud" class="drone-hud" hidden><strong>DRONE VIEW <b id="drone-speed">100m</b></strong><span>↑ ↓ 전진 · 후진 · ← → 천천히 선회</span></div>

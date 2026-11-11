@@ -66,6 +66,33 @@
       defaultCamDistance: 165,
       customDefaults: { latMin: 35.145, latMax: 35.195, latPlaceholder: '35.1587', lngMin: 129.130, lngMax: 129.200, lngPlaceholder: '129.1604' },
       presets: window.HAEUNDAE_PRESETS || []
+    },
+    incheon: {
+      id: 'incheon',
+      name: '인천',
+      subTitle: '인천공항·인천대교·송도',
+      brandTitle: 'INCHEON STUDIO',
+      brandSub: '인천·인천대교·인천공항 3D 지도',
+      brandMark: 'I',
+      brandColor: '#0070ba',
+      storageKey: 'incheon-studio-plan-v1',
+      sidebarEyebrow: 'AIRPORT, BRIDGE & SMART CITY',
+      sidebarTitle: '인천과 인천대교,<br>인천공항을 3D로 살펴보세요.',
+      sidebarDesc: '영종도 인천국제공항부터 국내 최장 사장교 인천대교, 첨단 송도국제도시와 서해 갯벌까지 3D 입체 지형으로 탐색해 보세요.',
+      viewerTitle: 'Incheon & Incheon Bridge',
+      viewerSub: '대한민국 인천광역시 · 북위 37.45°',
+      summaryTitle: '나만의 인천 3D 지도',
+      bounds: { west: 126.350, south: 37.330, east: 126.750, north: 37.560 },
+      mapWidth: 105,
+      mapDepth: 65,
+      heightFactor: 0.022,
+      droneAltitudeMeters: 90,
+      oceanBox: [120, 1.1, 75],
+      oceanRimBox: [122, 0.65, 77],
+      lightPos: [-32, 85, 42],
+      defaultCamDistance: 170,
+      customDefaults: { latMin: 37.330, latMax: 37.560, latPlaceholder: '37.4602', lngMin: 126.350, lngMax: 126.750, lngPlaceholder: '126.4407' },
+      presets: window.INCHEON_PRESETS || []
     }
   };
 
@@ -85,7 +112,12 @@
     weather: 'clear',
     weatherIntensity: 2,
     windEffect: true,
-    soundEnabled: false
+    soundEnabled: false,
+    solarDate: '2026-11-10',
+    solarTime: 1035, // 17:15 KST
+    solarLiveSync: false,
+    elevationProfileOpen: false,
+    elevationTransectMode: 'west-east'
   });
 
   function cleanState(raw, region) {
@@ -119,7 +151,12 @@
       weather: ['rain', 'snow', 'mist'].includes(raw.weather) ? raw.weather : 'clear',
       weatherIntensity: Math.min(3, Math.max(1, Number(raw.weatherIntensity) || 2)),
       windEffect: raw.windEffect !== false,
-      soundEnabled: Boolean(raw.soundEnabled)
+      soundEnabled: Boolean(raw.soundEnabled),
+      solarDate: typeof raw.solarDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.solarDate) ? raw.solarDate : '2026-11-10',
+      solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 1035,
+      solarLiveSync: Boolean(raw.solarLiveSync),
+      elevationProfileOpen: Boolean(raw.elevationProfileOpen),
+      elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east'
     };
   }
 
@@ -138,7 +175,7 @@
 
   // Three.js and Scene Variables
   let scene, camera, renderer, controls, terrain, ocean, oceanRim, shoreline, baseMesh, roadGroup;
-  let ambientLight, sunLight;
+  let ambientLight, sunLight, moonLight;
   let weatherGroup, rainPoints, splashPoints, snowPoints, mistPoints;
   let rainGeo, splashGeo, snowGeo, mistGeo;
   let rainPositions, splashPositions, splashAges, snowPositions, mistPositions;
@@ -150,6 +187,16 @@
   let rainGain = null;
   let windGain = null;
   let ambientNoiseNode = null;
+
+  // Incheon Bridge & Night Stars & Elevation Indicator
+  let incheonBridgeGroup = null;
+  let starsPoints = null;
+  let starsGeo = null;
+  let elevationPointerMesh = null;
+  let solarPlaying = false;
+  let solarSpeed = 10;
+  let currentSolarPosition = null;
+
   let regionCaches = {}; // Caches for heightData, textures, outline, roads per region
   let renderedHeightScale, renderedMapStyle, renderedWeather;
   let markerObjects = [];
@@ -217,7 +264,10 @@
   }
 
   function getOutline() {
-    return currentRegionId === 'jeju' ? window.JEJU_OUTLINE : window.HAEUNDAE_OUTLINE;
+    if (currentRegionId === 'jeju') return window.JEJU_OUTLINE;
+    if (currentRegionId === 'haeundae') return window.HAEUNDAE_OUTLINE;
+    if (currentRegionId === 'incheon') return window.INCHEON_OUTLINE;
+    return [];
   }
 
   function getRoadWays() {
@@ -226,15 +276,28 @@
         tags: { highway: road.type, name: road.name },
         geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
       })) : [];
-    } else {
+    } else if (currentRegionId === 'haeundae') {
       return Array.isArray(window.HAEUNDAE_ROADS) ? window.HAEUNDAE_ROADS.map((road) => ({
         tags: { highway: road.type, name: road.name },
         geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
       })) : [];
+    } else if (currentRegionId === 'incheon') {
+      return Array.isArray(window.INCHEON_ROADS) ? window.INCHEON_ROADS.map((road) => ({
+        tags: { highway: road.type, name: road.name },
+        geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
+      })) : [];
     }
+    return [];
   }
 
   function pointInLand(lat, lng) {
+    if (currentRegionId === 'incheon') {
+      const yjDist = Math.hypot((lng - 126.475) / 0.125, (lat - 37.465) / 0.065);
+      if (yjDist < 1.0) return true; // Yeongjongdo
+      if (lng >= 126.600 && lng <= 126.675 && lat >= 37.360 && lat <= 37.415) return true; // Songdo
+      if ((lng >= 126.605 && lat >= 37.415) || (lng >= 126.640 && lat >= 37.340)) return true; // Mainland
+      return false;
+    }
     const outline = getOutline();
     if (!outline || !outline.length) return true;
     let inside = false;
@@ -271,7 +334,7 @@
     const h10 = pixels[index(y0, x0 + 1)];
     const h01 = pixels[index(y0 + 1, x0)];
     const h11 = pixels[index(y0 + 1, x0 + 1)];
-    const maxMeters = currentRegionId === 'jeju' ? 2000 : 650;
+    const maxMeters = currentRegionId === 'jeju' ? 2000 : (currentRegionId === 'haeundae' ? 650 : 300);
     return ((h00 * (1 - dx) + h10 * dx) * (1 - dy) +
       (h01 * (1 - dx) + h11 * dx) * dy) / 255 * maxMeters;
   }
@@ -402,6 +465,26 @@
 
     applyWeatherAtmosphere();
     updateWeatherAudio();
+
+    // Solar UI Sync
+    const solarDateInp = $('#solar-date');
+    if (solarDateInp) solarDateInp.value = state.solarDate;
+    const solarSlider = $('#solar-time-slider');
+    if (solarSlider) solarSlider.value = state.solarTime;
+    updateSolarLighting(0);
+
+    // Elevation Profile UI Sync
+    const elevPanel = $('#elevation-profile-panel');
+    if (elevPanel) elevPanel.hidden = !state.elevationProfileOpen;
+    const elevToggleBtn = $('#elevation-toggle');
+    if (elevToggleBtn) {
+      elevToggleBtn.classList.toggle('is-active', state.elevationProfileOpen);
+      elevToggleBtn.setAttribute('aria-pressed', String(state.elevationProfileOpen));
+    }
+    document.querySelectorAll('.elev-mode-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.transect === state.elevationTransectMode);
+    });
+    if (state.elevationProfileOpen) updateElevationProfile();
 
     const cache = regionCaches[currentRegionId];
     if (terrain && cache && cache.textures) {
@@ -590,11 +673,11 @@
     $('#sidebar-title').innerHTML = r.sidebarTitle;
     $('#sidebar-desc').textContent = r.sidebarDesc;
     const kicker = $('#sidebar-kicker');
-    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : 'EXPLORE HAEUNDAE';
+    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : (r.id === 'haeundae' ? 'EXPLORE HAEUNDAE' : 'EXPLORE INCHEON');
     const styleLead = $('#panel-lead-style');
-    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.';
+    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : (r.id === 'haeundae' ? '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.' : '영종도 백운산과 송도, 인천대교의 높낮이를 살펴보세요.');
     const customName = $('#custom-name');
-    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : '예: 나만의 해운대 장소';
+    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : (r.id === 'haeundae' ? '예: 나만의 해운대 장소' : '예: 나만의 인천 장소');
 
     // Viewer badges
     $('#viewer-region-name').textContent = r.viewerTitle;
@@ -774,6 +857,90 @@
       });
     }
 
+    // Solar Controls
+    const solarDateInp = $('#solar-date');
+    if (solarDateInp) {
+      solarDateInp.addEventListener('change', (e) => {
+        commit(() => { state.solarDate = e.target.value; });
+        showToast(`기준 일자를 ${e.target.value}로 변경했어요.`);
+      });
+    }
+
+    const solarTimeSlider = $('#solar-time-slider');
+    if (solarTimeSlider) {
+      solarTimeSlider.addEventListener('input', (e) => {
+        state.solarTime = Number(e.target.value);
+        updateSolarLighting(0);
+      });
+      solarTimeSlider.addEventListener('change', (e) => {
+        commit(() => { state.solarTime = Number(e.target.value); });
+      });
+    }
+
+    const solarNowBtn = $('#solar-now-btn');
+    if (solarNowBtn) {
+      solarNowBtn.addEventListener('click', () => {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        const minutes = now.getHours() * 60 + now.getMinutes();
+        commit(() => {
+          state.solarDate = `${y}-${m}-${d}`;
+          state.solarTime = minutes;
+        });
+        showToast('현재 로컬 시각으로 동기화했어요.');
+      });
+    }
+
+    const solarPlayBtn = $('#solar-play-btn');
+    if (solarPlayBtn) {
+      solarPlayBtn.addEventListener('click', () => {
+        solarPlaying = !solarPlaying;
+        solarPlayBtn.textContent = solarPlaying ? '⏸ 정지' : '▶ 재생';
+        solarPlayBtn.style.background = solarPlaying ? '#dc2626' : '#1769c1';
+        showToast(solarPlaying ? '태양 궤적 24시간 재생을 시작했어요.' : '태양 궤적 재생을 일시정지했어요.');
+      });
+    }
+
+    const solarSpeedSel = $('#solar-speed');
+    if (solarSpeedSel) {
+      solarSpeedSel.addEventListener('change', (e) => {
+        solarSpeed = Number(e.target.value);
+      });
+    }
+
+    document.querySelectorAll('[data-solar-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const p = btn.dataset.solarPreset;
+        const targetMin = p === 'sunrise' ? 420 : p === 'noon' ? 720 : p === 'golden' ? 1020 : p === 'sunset' ? 1050 : 60;
+        commit(() => { state.solarTime = targetMin; });
+        showToast(`${btn.textContent.trim()} 시각으로 이동했어요.`);
+      });
+    });
+
+    // Elevation Profile Controls
+    const elevToggleBtn = $('#elevation-toggle');
+    if (elevToggleBtn) {
+      elevToggleBtn.addEventListener('click', () => {
+        commit(() => { state.elevationProfileOpen = !state.elevationProfileOpen; });
+      });
+    }
+
+    const elevCloseBtn = $('#elev-close-btn');
+    if (elevCloseBtn) {
+      elevCloseBtn.addEventListener('click', () => {
+        commit(() => { state.elevationProfileOpen = false; });
+      });
+    }
+
+    document.querySelectorAll('.elev-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.transect;
+        commit(() => { state.elevationTransectMode = mode; });
+      });
+    });
+
     $('#road-toggle').addEventListener('click', () => commit(() => { state.showRoads = !state.showRoads; }));
     $('#drone-toggle').addEventListener('click', () => setDroneMode(!droneMode));
     window.addEventListener('keydown', (event) => {
@@ -923,6 +1090,36 @@
       }
 
       regionCaches.haeundae = {
+        heightData,
+        textures: { natural, elevation, normal }
+      };
+    } else if (regionId === 'incheon') {
+      if (typeof window.createIncheonAssets !== 'function') {
+        throw new Error('인천 3D 에셋 생성기를 찾을 수 없습니다.');
+      }
+      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas } = window.createIncheonAssets();
+      const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
+      const heightData = {
+        width: heightCanvas.width,
+        height: heightCanvas.height,
+        pixels: hCtx.getImageData(0, 0, heightCanvas.width, heightCanvas.height).data
+      };
+
+      const natural = new THREE.CanvasTexture(naturalCanvas);
+      natural.encoding = THREE.sRGBEncoding;
+      natural.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+      const elevation = new THREE.CanvasTexture(elevationCanvas);
+      elevation.encoding = THREE.sRGBEncoding;
+      elevation.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+      let normal;
+      if (normalCanvas) {
+        normal = new THREE.CanvasTexture(normalCanvas);
+        normal.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      }
+
+      regionCaches.incheon = {
         heightData,
         textures: { natural, elevation, normal }
       };
@@ -1636,8 +1833,745 @@
     buildIslandBase();
     buildTerrain();
     buildRoads();
+    buildIncheonBridge();
     syncMarkers();
     resetWeatherBounds();
+  }
+
+  function buildIncheonBridge() {
+    if (incheonBridgeGroup) {
+      disposeObject(incheonBridgeGroup);
+      incheonBridgeGroup = null;
+    }
+    if (currentRegionId !== 'incheon') return;
+
+    incheonBridgeGroup = new THREE.Group();
+    incheonBridgeGroup.name = 'incheon-bridge';
+
+    // Incheon Grand Bridge route coordinates spanning sea between Songdo and Yeongjongdo
+    const bridgeWaypoints = [
+      [126.6150, 37.3750],
+      [126.5950, 37.3900],
+      [126.5780, 37.4050],
+      [126.5680, 37.4140], // Main cable-stayed navigation span
+      [126.5450, 37.4260],
+      [126.5200, 37.4200],
+      [126.4950, 37.4050]
+    ];
+
+    // Bridge deck curved viaduct
+    const deckPoints = bridgeWaypoints.map(([lng, lat]) => {
+      const { x, z } = worldPosition(lat, lng);
+      const isMainSpan = Math.abs(lat - 37.4140) < 0.015;
+      const y = isMainSpan ? 3.6 : 2.2;
+      return new THREE.Vector3(x, y, z);
+    });
+
+    const bridgeCurve = new THREE.CatmullRomCurve3(deckPoints);
+    const bridgeTubeGeo = new THREE.TubeGeometry(bridgeCurve, 64, 0.45, 6, false);
+    const bridgeMat = new THREE.MeshStandardMaterial({
+      color: 0xdde6ed,
+      roughness: 0.38,
+      metalness: 0.25
+    });
+    const bridgeDeck = new THREE.Mesh(bridgeTubeGeo, bridgeMat);
+    bridgeDeck.castShadow = true;
+    bridgeDeck.receiveShadow = true;
+    incheonBridgeGroup.add(bridgeDeck);
+
+    // Deck asphalt roadway stripe
+    const roadPoints = bridgeCurve.getPoints(90);
+    const roadLineGeo = new THREE.BufferGeometry().setFromPoints(roadPoints.map(p => new THREE.Vector3(p.x, p.y + 0.28, p.z)));
+    const roadLineMat = new THREE.LineBasicMaterial({ color: 0x334155, linewidth: 2 });
+    const roadLine = new THREE.Line(roadLineGeo, roadLineMat);
+    incheonBridgeGroup.add(roadLine);
+
+    // Iconic Incheon Bridge Twin Inverted-Y Diamond Cable-Stayed Pylons
+    const towerCoords = [
+      [126.5650, 37.4168],
+      [126.5710, 37.4112]
+    ];
+
+    const towerMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      roughness: 0.28,
+      metalness: 0.35
+    });
+
+    const cableMat = new THREE.LineBasicMaterial({
+      color: 0xe2e8f0,
+      transparent: true,
+      opacity: 0.75
+    });
+
+    towerCoords.forEach(([lng, lat]) => {
+      const { x, z } = worldPosition(lat, lng);
+      const towerGroup = new THREE.Group();
+      towerGroup.position.set(x, 0, z);
+
+      // Inverted-Y diamond legs
+      const legGeo = new THREE.CylinderGeometry(0.26, 0.52, 14.5, 8);
+      const leftLeg = new THREE.Mesh(legGeo, towerMat);
+      leftLeg.position.set(-0.85, 7.25, 0);
+      leftLeg.rotation.z = -0.07;
+      leftLeg.castShadow = true;
+      towerGroup.add(leftLeg);
+
+      const rightLeg = new THREE.Mesh(legGeo, towerMat);
+      rightLeg.position.set(0.85, 7.25, 0);
+      rightLeg.rotation.z = 0.07;
+      rightLeg.castShadow = true;
+      towerGroup.add(rightLeg);
+
+      // Upper single diamond tower mast
+      const topMastGeo = new THREE.CylinderGeometry(0.18, 0.42, 7.5, 8);
+      const topMast = new THREE.Mesh(topMastGeo, towerMat);
+      topMast.position.set(0, 18.2, 0);
+      topMast.castShadow = true;
+      towerGroup.add(topMast);
+
+      // Red aircraft warning beacon light atop pylon
+      const beaconGeo = new THREE.SphereGeometry(0.24, 8, 8);
+      const beaconMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+      const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+      beacon.position.set(0, 22.1, 0);
+      towerGroup.add(beacon);
+
+      // Stay cables radiating down to deck
+      const cablePts = [];
+      const cableCount = 8;
+      for (let c = 0; c < cableCount; c++) {
+        const topY = 14 + (c / cableCount) * 7.5;
+        const dist = 3.2 + c * 2.1;
+        // Fore stays
+        cablePts.push(new THREE.Vector3(x, topY, z));
+        cablePts.push(new THREE.Vector3(x - dist * 0.7, 3.6, z - dist * 0.7));
+        // Aft stays
+        cablePts.push(new THREE.Vector3(x, topY, z));
+        cablePts.push(new THREE.Vector3(x + dist * 0.7, 3.6, z + dist * 0.7));
+      }
+      const cableGeo = new THREE.BufferGeometry().setFromPoints(cablePts);
+      const cableLines = new THREE.LineSegments(cableGeo, cableMat);
+      incheonBridgeGroup.add(cableLines);
+
+      // Pier foundation in ocean
+      const pierGeo = new THREE.BoxGeometry(2.4, 3.2, 2.4);
+      const pierMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.8 });
+      const pier = new THREE.Mesh(pierGeo, pierMat);
+      pier.position.set(0, 0.6, 0);
+      pier.castShadow = true;
+      towerGroup.add(pier);
+
+      incheonBridgeGroup.add(towerGroup);
+    });
+
+    // Viaduct support piers along the route
+    for (let i = 0; i < deckPoints.length; i += 2) {
+      const p = deckPoints[i];
+      const pierGeo = new THREE.CylinderGeometry(0.3, 0.4, p.y + 1.2, 8);
+      const pierMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.7 });
+      const pierMesh = new THREE.Mesh(pierGeo, pierMat);
+      pierMesh.position.set(p.x, (p.y + 1.2) / 2 - 1.2, p.z);
+      pierMesh.castShadow = true;
+      incheonBridgeGroup.add(pierMesh);
+    }
+
+    scene.add(incheonBridgeGroup);
+  }
+
+  function buildNightSkyStars() {
+    if (starsPoints) disposeObject(starsPoints);
+
+    const starCount = 950;
+    const starPositions = new Float32Array(starCount * 3);
+    const starColors = new Float32Array(starCount * 3);
+
+    for (let i = 0; i < starCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 0.88 + 0.12);
+      const radius = 320 + Math.random() * 60;
+
+      starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+      starPositions[i * 3 + 1] = radius * Math.cos(phi);
+      starPositions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+
+      const starType = Math.random();
+      if (starType > 0.8) {
+        starColors[i * 3] = 0.96; starColors[i * 3 + 1] = 0.92; starColors[i * 3 + 2] = 0.76;
+      } else if (starType > 0.4) {
+        starColors[i * 3] = 0.84; starColors[i * 3 + 1] = 0.93; starColors[i * 3 + 2] = 1.0;
+      } else {
+        starColors[i * 3] = 1.0; starColors[i * 3 + 1] = 1.0; starColors[i * 3 + 2] = 1.0;
+      }
+    }
+
+    starsGeo = new THREE.BufferGeometry();
+    starsGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+    starsGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+
+    const starsMat = new THREE.PointsMaterial({
+      size: 2.2,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0,
+      fog: false,
+      sizeAttenuation: false
+    });
+
+    starsPoints = new THREE.Points(starsGeo, starsMat);
+    scene.add(starsPoints);
+  }
+
+  function buildElevationPointer() {
+    if (elevationPointerMesh) disposeObject(elevationPointerMesh);
+
+    elevationPointerMesh = new THREE.Group();
+    elevationPointerMesh.name = 'elevation-pointer';
+
+    // Glowing cyan vertical marker cylinder
+    const beaconGeo = new THREE.CylinderGeometry(0.32, 0.06, 7.5, 12);
+    beaconGeo.translate(0, 3.75, 0);
+    const beaconMat = new THREE.MeshBasicMaterial({
+      color: 0x00f5ff,
+      transparent: true,
+      opacity: 0.85
+    });
+    const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
+    elevationPointerMesh.add(beaconMesh);
+
+    // Glowing target ring on ground
+    const ringGeo = new THREE.RingGeometry(0.8, 1.25, 24);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x00f5ff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9
+    });
+    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    ringMesh.position.y = 0.15;
+    elevationPointerMesh.add(ringMesh);
+
+    elevationPointerMesh.visible = false;
+    scene.add(elevationPointerMesh);
+  }
+
+  function calculateSolarPosition(latDeg, lngDeg, dateStr, minutesFromMidnight) {
+    const parts = (dateStr || '2026-11-10').split('-');
+    const year = parseInt(parts[0], 10) || 2026;
+    const month = parseInt(parts[1], 10) || 11;
+    const day = parseInt(parts[2], 10) || 10;
+
+    const startOfYear = new Date(Date.UTC(year, 0, 1));
+    const targetDate = new Date(Date.UTC(year, month - 1, day));
+    const dayOfYear = Math.floor((targetDate - startOfYear) / 86400000) + 1;
+
+    const gamma = (2 * Math.PI / 365) * (dayOfYear - 1 + (minutesFromMidnight / 60 - 12) / 24);
+
+    const eqtime = 229.18 * (
+      0.000075 +
+      0.001868 * Math.cos(gamma) -
+      0.032077 * Math.sin(gamma) -
+      0.014615 * Math.cos(2 * gamma) -
+      0.040849 * Math.sin(2 * gamma)
+    );
+
+    const decl = 0.006918 -
+      0.399912 * Math.cos(gamma) +
+      0.070257 * Math.sin(gamma) -
+      0.006758 * Math.cos(2 * gamma) +
+      0.000907 * Math.sin(2 * gamma) -
+      0.002697 * Math.cos(3 * gamma) +
+      0.00148 * Math.sin(3 * gamma);
+
+    const timeOffset = eqtime + 4 * (lngDeg - 135);
+    const trueSolarTime = (minutesFromMidnight + timeOffset + 1440) % 1440;
+
+    const hourAngleDeg = (trueSolarTime / 4) - 180;
+    const hourAngleRad = THREE.MathUtils.degToRad(hourAngleDeg);
+    const latRad = THREE.MathUtils.degToRad(latDeg);
+
+    const csz = Math.sin(latRad) * Math.sin(decl) + Math.cos(latRad) * Math.cos(decl) * Math.cos(hourAngleRad);
+    const zenithRad = Math.acos(Math.max(-1, Math.min(1, csz)));
+    const elevationRad = Math.PI / 2 - zenithRad;
+    const elevationDeg = THREE.MathUtils.radToDeg(elevationRad);
+
+    const cosAz = (Math.sin(decl) - Math.sin(latRad) * csz) / (Math.cos(latRad) * Math.sin(zenithRad));
+    let azimuthRad = Math.acos(Math.max(-1, Math.min(1, cosAz)));
+    if (hourAngleDeg > 0) {
+      azimuthRad = 2 * Math.PI - azimuthRad;
+    }
+    const azimuthDeg = THREE.MathUtils.radToDeg(azimuthRad);
+
+    const cosH0 = (Math.cos(THREE.MathUtils.degToRad(90.833)) - Math.sin(latRad) * Math.sin(decl)) / (Math.cos(latRad) * Math.cos(decl));
+    let sunriseMinutes = 428;
+    let sunsetMinutes = 1044;
+    if (cosH0 >= -1 && cosH0 <= 1) {
+      const H0Deg = THREE.MathUtils.radToDeg(Math.acos(cosH0));
+      sunriseMinutes = Math.round(720 - 4 * (lngDeg - 135) - eqtime - 4 * H0Deg);
+      sunsetMinutes = Math.round(720 - 4 * (lngDeg - 135) - eqtime + 4 * H0Deg);
+    }
+
+    return {
+      elevationDeg,
+      azimuthDeg,
+      sunriseMinutes,
+      sunsetMinutes
+    };
+  }
+
+  function updateSolarLighting(delta = 0) {
+    if (solarPlaying) {
+      state.solarTime = (state.solarTime + delta * solarSpeed * 10) % 1440;
+      const slider = $('#solar-time-slider');
+      if (slider) slider.value = Math.round(state.solarTime);
+    }
+
+    const r = getRegion();
+    const centerLat = (r.bounds.north + r.bounds.south) / 2;
+    const centerLng = (r.bounds.east + r.bounds.west) / 2;
+
+    const solar = calculateSolarPosition(centerLat, centerLng, state.solarDate, state.solarTime);
+    currentSolarPosition = solar;
+
+    // UI Updates
+    const h = Math.floor(state.solarTime / 60);
+    const m = Math.floor(state.solarTime % 60);
+    const clockStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    const clockEl = $('#solar-clock-display');
+    if (clockEl) clockEl.textContent = clockStr;
+
+    const srH = Math.floor(solar.sunriseMinutes / 60);
+    const srM = Math.floor(solar.sunriseMinutes % 60);
+    const ssH = Math.floor(solar.sunsetMinutes / 60);
+    const ssM = Math.floor(solar.sunsetMinutes % 60);
+    const srEl = $('#solar-sunrise-time');
+    if (srEl) srEl.textContent = `${String(srH).padStart(2, '0')}:${String(srM).padStart(2, '0')}`;
+    const ssEl = $('#solar-sunset-time');
+    if (ssEl) ssEl.textContent = `${String(ssH).padStart(2, '0')}:${String(ssM).padStart(2, '0')}`;
+
+    const elevEl = $('#solar-elevation-deg');
+    if (elevEl) elevEl.textContent = `${solar.elevationDeg.toFixed(1)}°`;
+
+    const badge = $('#solar-phase-badge');
+    if (badge) {
+      if (solar.elevationDeg > 45) {
+        badge.textContent = '한낮 (태양 정점)';
+        badge.style.background = '#fef3c7';
+        badge.style.color = '#92400e';
+      } else if (solar.elevationDeg > 12) {
+        badge.textContent = '낮 (일조 중)';
+        badge.style.background = '#e0f2fe';
+        badge.style.color = '#0369a1';
+      } else if (solar.elevationDeg > 0) {
+        badge.textContent = '골든 아워 (일출/일몰 황금빛)';
+        badge.style.background = '#ffedd5';
+        badge.style.color = '#c2410c';
+      } else if (solar.elevationDeg > -6) {
+        badge.textContent = '시민 박명 (여명/노을)';
+        badge.style.background = '#fae8ff';
+        badge.style.color = '#86198f';
+      } else if (solar.elevationDeg > -12) {
+        badge.textContent = '항해 박명 (매직 아워)';
+        badge.style.background = '#ede9fe';
+        badge.style.color = '#5b21b6';
+      } else {
+        badge.textContent = '심야 (달빛과 별자리)';
+        badge.style.background = '#1e293b';
+        badge.style.color = '#93c5fd';
+      }
+    }
+
+    if (!sunLight || !ambientLight) return;
+
+    const elRad = THREE.MathUtils.degToRad(Math.max(-25, solar.elevationDeg));
+    const azRad = THREE.MathUtils.degToRad(solar.azimuthDeg);
+    const sunDist = 130;
+
+    const sunX = Math.sin(azRad) * Math.cos(elRad) * sunDist;
+    const sunY = Math.sin(elRad) * sunDist;
+    const sunZ = -Math.cos(azRad) * Math.cos(elRad) * sunDist;
+
+    sunLight.position.set(sunX, Math.max(1, sunY), sunZ);
+
+    if (moonLight) {
+      moonLight.position.set(-sunX, Math.max(12, -sunY), -sunZ);
+    }
+
+    const elev = solar.elevationDeg;
+
+    if (elev > 0) {
+      const sunRatio = Math.min(1, elev / 45);
+      const sunR = THREE.MathUtils.lerp(1.0, 1.0, sunRatio);
+      const sunG = THREE.MathUtils.lerp(0.58, 0.98, sunRatio);
+      const sunB = THREE.MathUtils.lerp(0.24, 0.94, sunRatio);
+      sunLight.color.setRGB(sunR, sunG, sunB);
+      sunLight.intensity = THREE.MathUtils.lerp(0.35, 1.15, Math.min(1, elev / 18));
+      sunLight.castShadow = true;
+
+      const ambR = THREE.MathUtils.lerp(0.55, 0.86, sunRatio);
+      const ambG = THREE.MathUtils.lerp(0.48, 0.94, sunRatio);
+      const ambB = THREE.MathUtils.lerp(0.52, 0.98, sunRatio);
+      ambientLight.color.setRGB(ambR, ambG, ambB);
+      ambientLight.groundColor.setHex(0x5a6358);
+      ambientLight.intensity = THREE.MathUtils.lerp(0.42, 0.78, sunRatio);
+
+      if (renderer && state.weather === 'clear') {
+        const bgR = THREE.MathUtils.lerp(0.35, 0.93, sunRatio);
+        const bgG = THREE.MathUtils.lerp(0.30, 0.96, sunRatio);
+        const bgB = THREE.MathUtils.lerp(0.38, 0.97, sunRatio);
+        renderer.setClearColor(new THREE.Color(bgR, bgG, bgB), 1);
+      }
+
+      if (moonLight) moonLight.intensity = 0;
+      if (starsPoints && starsPoints.material) starsPoints.material.opacity = 0;
+    } else {
+      const nightRatio = Math.min(1, -elev / 15);
+
+      sunLight.intensity = Math.max(0, 0.35 * (1 - nightRatio * 2));
+      sunLight.castShadow = false;
+
+      if (moonLight) {
+        moonLight.color.setHex(0x8dafd8);
+        moonLight.intensity = THREE.MathUtils.lerp(0.05, 0.42, nightRatio);
+      }
+
+      const ambR = THREE.MathUtils.lerp(0.28, 0.06, nightRatio);
+      const ambG = THREE.MathUtils.lerp(0.20, 0.08, nightRatio);
+      const ambB = THREE.MathUtils.lerp(0.32, 0.16, nightRatio);
+      ambientLight.color.setRGB(ambR, ambG, ambB);
+      ambientLight.groundColor.setHex(0x060910);
+      ambientLight.intensity = THREE.MathUtils.lerp(0.40, 0.28, nightRatio);
+
+      if (renderer && state.weather === 'clear') {
+        const bgR = THREE.MathUtils.lerp(0.22, 0.03, nightRatio);
+        const bgG = THREE.MathUtils.lerp(0.18, 0.05, nightRatio);
+        const bgB = THREE.MathUtils.lerp(0.28, 0.09, nightRatio);
+        renderer.setClearColor(new THREE.Color(bgR, bgG, bgB), 1);
+      }
+
+      if (starsPoints && starsPoints.material) {
+        starsPoints.material.opacity = THREE.MathUtils.lerp(0.0, 0.95, Math.min(1, (-elev - 2) / 10));
+      }
+    }
+  }
+
+  function updateElevationProfile() {
+    const r = getRegion();
+    const mode = state.elevationTransectMode || 'west-east';
+    const sampleCount = 120;
+    const samples = [];
+
+    function haversineKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = THREE.MathUtils.degToRad(lat2 - lat1);
+      const dLon = THREE.MathUtils.degToRad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(THREE.MathUtils.degToRad(lat1)) * Math.cos(THREE.MathUtils.degToRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    let runningDist = 0;
+
+    if (mode === 'west-east') {
+      const midLat = (r.bounds.north + r.bounds.south) / 2;
+      for (let i = 0; i < sampleCount; i++) {
+        const t = i / (sampleCount - 1);
+        const lng = r.bounds.west + t * (r.bounds.east - r.bounds.west);
+        const lat = midLat;
+        const elev = Math.max(0, heightAt(lat, lng));
+        const pos = worldPosition(lat, lng);
+        if (i > 0) {
+          const prev = samples[i - 1];
+          runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
+        }
+        samples.push({
+          index: i,
+          lat,
+          lng,
+          x: pos.x,
+          z: pos.z,
+          distanceKm: runningDist,
+          elevationM: elev
+        });
+      }
+    } else if (mode === 'north-south') {
+      const midLng = (r.bounds.east + r.bounds.west) / 2;
+      for (let i = 0; i < sampleCount; i++) {
+        const t = i / (sampleCount - 1);
+        const lat = r.bounds.north - t * (r.bounds.north - r.bounds.south);
+        const lng = midLng;
+        const elev = Math.max(0, heightAt(lat, lng));
+        const pos = worldPosition(lat, lng);
+        if (i > 0) {
+          const prev = samples[i - 1];
+          runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
+        }
+        samples.push({
+          index: i,
+          lat,
+          lng,
+          x: pos.x,
+          z: pos.z,
+          distanceKm: runningDist,
+          elevationM: elev
+        });
+      }
+    } else {
+      const waypoints = state.markers.length >= 2 ? state.markers : r.presets.slice(0, 5);
+      if (waypoints.length >= 2) {
+        const segSamples = Math.floor(sampleCount / (waypoints.length - 1));
+        for (let seg = 0; seg < waypoints.length - 1; seg++) {
+          const p1 = waypoints[seg];
+          const p2 = waypoints[seg + 1];
+          for (let s = 0; s < segSamples; s++) {
+            const t = s / segSamples;
+            const lat = p1.lat + t * (p2.lat - p1.lat);
+            const lng = p1.lng + t * (p2.lng - p1.lng);
+            const elev = Math.max(0, heightAt(lat, lng));
+            const pos = worldPosition(lat, lng);
+            if (samples.length > 0) {
+              const prev = samples[samples.length - 1];
+              runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
+            }
+            samples.push({
+              index: samples.length,
+              lat,
+              lng,
+              x: pos.x,
+              z: pos.z,
+              distanceKm: runningDist,
+              elevationM: elev,
+              name: s === 0 ? p1.name : undefined
+            });
+          }
+        }
+        const lastP = waypoints[waypoints.length - 1];
+        const lastElev = Math.max(0, heightAt(lastP.lat, lastP.lng));
+        const lastPos = worldPosition(lastP.lat, lastP.lng);
+        runningDist += haversineKm(samples[samples.length - 1].lat, samples[samples.length - 1].lng, lastP.lat, lastP.lng);
+        samples.push({
+          index: samples.length,
+          lat: lastP.lat,
+          lng: lastP.lng,
+          x: lastPos.x,
+          z: lastPos.z,
+          distanceKm: runningDist,
+          elevationM: lastElev,
+          name: lastP.name
+        });
+      } else {
+        const midLat = (r.bounds.north + r.bounds.south) / 2;
+        for (let i = 0; i < sampleCount; i++) {
+          const t = i / (sampleCount - 1);
+          const lng = r.bounds.west + t * (r.bounds.east - r.bounds.west);
+          const lat = midLat;
+          const elev = Math.max(0, heightAt(lat, lng));
+          const pos = worldPosition(lat, lng);
+          if (i > 0) {
+            const prev = samples[i - 1];
+            runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
+          }
+          samples.push({
+            index: i,
+            lat,
+            lng,
+            x: pos.x,
+            z: pos.z,
+            distanceKm: runningDist,
+            elevationM: elev
+          });
+        }
+      }
+    }
+
+    let minE = Infinity;
+    let maxE = -Infinity;
+    let sumE = 0;
+    let maxGrade = 0;
+
+    for (let i = 0; i < samples.length; i++) {
+      const e = samples[i].elevationM;
+      if (e < minE) minE = e;
+      if (e > maxE) maxE = e;
+      sumE += e;
+
+      if (i > 0) {
+        const dDistM = (samples[i].distanceKm - samples[i - 1].distanceKm) * 1000;
+        const dElevM = Math.abs(e - samples[i - 1].elevationM);
+        if (dDistM > 10) {
+          const grade = (dElevM / dDistM) * 100;
+          if (grade > maxGrade) maxGrade = Math.min(65, grade);
+        }
+      }
+    }
+
+    const avgE = sumE / Math.max(1, samples.length);
+    const totalDist = samples[samples.length - 1].distanceKm;
+
+    const minEl = $('#elev-stat-min') || $('#elev-min-val');
+    if (minEl) minEl.textContent = `${Math.round(minE)}m`;
+    const maxEl = $('#elev-stat-max') || $('#elev-max-val');
+    if (maxEl) maxEl.textContent = `${Math.round(maxE)}m`;
+    const avgEl = $('#elev-avg-val');
+    if (avgEl) avgEl.textContent = `${Math.round(avgE)}m`;
+    const distEl = $('#elev-stat-dist') || $('#elev-dist-val');
+    if (distEl) distEl.textContent = `${totalDist.toFixed(1)} km`;
+    const gradeEl = $('#elev-stat-slope') || $('#elev-grade-val');
+    if (gradeEl) gradeEl.textContent = `${maxGrade.toFixed(1)}%`;
+
+    if (!window.d3) return;
+
+    const svg = d3.select('#elevation-chart-svg');
+    svg.selectAll('*').remove();
+
+    const svgNode = svg.node();
+    const width = svgNode ? (svgNode.clientWidth || 740) : 740;
+    const height = svgNode ? (svgNode.clientHeight || 170) : 170;
+    const margin = { top: 18, right: 32, bottom: 30, left: 52 };
+
+    const chartWidth = Math.max(100, width - margin.left - margin.right);
+    const chartHeight = Math.max(50, height - margin.top - margin.bottom);
+
+    const g = svg.append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const xScale = d3.scaleLinear()
+      .domain([0, totalDist])
+      .range([0, chartWidth]);
+
+    const yUpper = Math.max(60, maxE * 1.28);
+    const yScale = d3.scaleLinear()
+      .domain([0, yUpper])
+      .range([chartHeight, 0]);
+
+    const defs = svg.append('defs');
+    const grad = defs.append('linearGradient')
+      .attr('id', 'elev-area-gradient')
+      .attr('x1', '0%').attr('y1', '0%')
+      .attr('x2', '0%').attr('y2', '100%');
+
+    grad.append('stop').attr('offset', '0%').attr('stop-color', '#0ea5e9').attr('stop-opacity', 0.75);
+    grad.append('stop').attr('offset', '65%').attr('stop-color', '#10b981').attr('stop-opacity', 0.35);
+    grad.append('stop').attr('offset', '100%').attr('stop-color', '#0f766e').attr('stop-opacity', 0.05);
+
+    const areaGen = d3.area()
+      .x(d => xScale(d.distanceKm))
+      .y0(chartHeight)
+      .y1(d => yScale(d.elevationM))
+      .curve(d3.curveMonotoneX);
+
+    const lineGen = d3.line()
+      .x(d => xScale(d.distanceKm))
+      .y(d => yScale(d.elevationM))
+      .curve(d3.curveMonotoneX);
+
+    g.append('path')
+      .datum(samples)
+      .attr('fill', 'url(#elev-area-gradient)')
+      .attr('d', areaGen);
+
+    g.append('path')
+      .datum(samples)
+      .attr('fill', 'none')
+      .attr('stroke', '#0284c7')
+      .attr('stroke-width', 2.4)
+      .attr('d', lineGen);
+
+    const yAxisGrid = d3.axisLeft(yScale)
+      .ticks(4)
+      .tickSize(-chartWidth)
+      .tickFormat('')
+      .tickSizeOuter(0);
+
+    g.append('g')
+      .attr('class', 'elev-grid')
+      .attr('stroke-dasharray', '3,3')
+      .attr('opacity', 0.18)
+      .call(yAxisGrid);
+
+    const xAxis = d3.axisBottom(xScale)
+      .ticks(Math.min(7, Math.floor(chartWidth / 75)))
+      .tickFormat(d => `${d}km`);
+
+    const yAxis = d3.axisLeft(yScale)
+      .ticks(4)
+      .tickFormat(d => `${d}m`);
+
+    g.append('g')
+      .attr('transform', `translate(0,${chartHeight})`)
+      .attr('color', '#64748b')
+      .attr('font-size', '11px')
+      .call(xAxis);
+
+    g.append('g')
+      .attr('color', '#64748b')
+      .attr('font-size', '11px')
+      .call(yAxis);
+
+    const hoverLine = g.append('line')
+      .attr('y1', 0)
+      .attr('y2', chartHeight)
+      .attr('stroke', '#0ea5e9')
+      .attr('stroke-width', 1.5)
+      .attr('stroke-dasharray', '4,3')
+      .style('opacity', 0);
+
+    const hoverCircle = g.append('circle')
+      .attr('r', 5)
+      .attr('fill', '#0284c7')
+      .attr('stroke', '#ffffff')
+      .attr('stroke-width', 2)
+      .style('opacity', 0);
+
+    const tooltip = d3.select('#elev-chart-tooltip');
+    const bisectDistance = d3.bisector(d => d.distanceKm).left;
+
+    g.append('rect')
+      .attr('width', chartWidth)
+      .attr('height', chartHeight)
+      .attr('fill', 'transparent')
+      .style('cursor', 'crosshair')
+      .on('pointermove', function(event) {
+        const [mx] = d3.pointer(event);
+        const distVal = xScale.invert(mx);
+        const idx = Math.max(0, Math.min(samples.length - 1, bisectDistance(samples, distVal)));
+        const d0 = samples[idx - 1];
+        const d1 = samples[idx];
+        const s = (!d0) ? d1 : (!d1) ? d0 : (distVal - d0.distanceKm > d1.distanceKm - distVal ? d1 : d0);
+
+        if (!s) return;
+
+        const cx = xScale(s.distanceKm);
+        const cy = yScale(s.elevationM);
+
+        hoverLine.attr('x1', cx).attr('x2', cx).style('opacity', 1);
+        hoverCircle.attr('cx', cx).attr('cy', cy).style('opacity', 1);
+
+        tooltip
+          .style('display', 'block')
+          .style('left', `${margin.left + cx + 12}px`)
+          .style('top', `${Math.max(10, margin.top + cy - 28)}px`)
+          .html(`
+            <strong>${s.name ? s.name + '<br>' : ''}${s.distanceKm.toFixed(1)} km</strong>
+            <div>고도: <span style="color:#0284c7; font-weight:700;">${Math.round(s.elevationM)} m</span></div>
+            <small style="color:#64748b;">위도 ${s.lat.toFixed(4)}, 경도 ${s.lng.toFixed(4)}</small>
+          `);
+
+        if (elevationPointerMesh) {
+          const surfY = surfaceHeight(s.lat, s.lng);
+          elevationPointerMesh.position.set(s.x, surfY, s.z);
+          elevationPointerMesh.visible = true;
+        }
+      })
+      .on('pointerleave', function() {
+        hoverLine.style('opacity', 0);
+        hoverCircle.style('opacity', 0);
+        tooltip.style('display', 'none');
+        if (elevationPointerMesh) elevationPointerMesh.visible = false;
+      });
   }
 
   async function initScene() {
@@ -1679,6 +2613,17 @@
     sunLight.shadow.camera.bottom = -85;
     sunLight.shadow.bias = -0.00015;
     scene.add(sunLight);
+
+    // Moonlight for night lighting
+    moonLight = new THREE.DirectionalLight(0x8dafd8, 0.0);
+    moonLight.position.set(35, 70, -45);
+    scene.add(moonLight);
+
+    // Build night celestial dome starfield
+    buildNightSkyStars();
+
+    // Build 3D elevation profile pointer
+    buildElevationPointer();
 
     // Build weather systems
     buildWeatherSystems();
@@ -1745,6 +2690,7 @@
       if (!droneMode) controls.update();
       updateLabels();
       updateWeather(delta, time);
+      updateSolarLighting(delta);
       renderer.render(scene, camera);
     };
     animate();

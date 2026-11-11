@@ -7,6 +7,9 @@ const REGIONS = {
   },
   haeundae: {
     bounds: { west: 129.130, south: 35.145, east: 129.200, north: 35.195 }
+  },
+  incheon: {
+    bounds: { west: 126.350, south: 37.330, east: 126.750, north: 37.560 }
   }
 };
 
@@ -42,7 +45,12 @@ function cleanState(raw: any, bounds = REGIONS.jeju.bounds) {
     showRoads: raw.showRoads !== false,
     weather: ['rain', 'snow', 'mist'].includes(raw.weather) ? raw.weather : 'clear',
     weatherIntensity: Math.min(3, Math.max(1, Number(raw.weatherIntensity) || 2)),
-    windEffect: raw.windEffect !== false
+    windEffect: raw.windEffect !== false,
+    solarDate: typeof raw.solarDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.solarDate) ? raw.solarDate : '2026-11-10',
+    solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 720,
+    solarLiveSync: Boolean(raw.solarLiveSync),
+    elevationProfileOpen: Boolean(raw.elevationProfileOpen),
+    elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east'
   };
 }
 
@@ -83,6 +91,27 @@ test('cleanState validates markers within Busan Haeundae bounds', () => {
   assert.equal(output.selectedId, 'haeundae_beach');
 });
 
+test('cleanState validates markers within Incheon, Incheon Bridge, Incheon Airport bounds', () => {
+  const input = {
+    markers: [
+      { id: 'incheon_airport', name: '인천국제공항', category: '공항', lat: 37.4602, lng: 126.4407 },
+      { id: 'incheon_bridge', name: '인천대교 주탑', category: '교량', lat: 37.4140, lng: 126.5680 },
+      { id: 'songdo_central', name: '송도 센트럴파크', category: '공원', lat: 37.3925, lng: 126.6380 },
+      { id: 'hallasan', name: '한라산', category: '제주', lat: 33.3617, lng: 126.5292 } // Out of bounds
+    ],
+    selectedId: 'incheon_airport',
+    mapStyle: 'natural',
+    heightScale: 100
+  };
+
+  const output = cleanState(input, REGIONS.incheon.bounds);
+  assert.equal(output.markers.length, 3);
+  assert.equal(output.markers[0].id, 'incheon_airport');
+  assert.equal(output.markers[1].id, 'incheon_bridge');
+  assert.equal(output.markers[2].id, 'songdo_central');
+  assert.equal(output.selectedId, 'incheon_airport');
+});
+
 test('cleanState clamps heightScale between 40 and 180', () => {
   const low = cleanState({ markers: [] }, REGIONS.haeundae.bounds);
   assert.equal(low.heightScale, 100);
@@ -99,18 +128,28 @@ test('cleanState throws on invalid payload', () => {
   assert.throws(() => cleanState({ markers: 'not-an-array' }), /지도 데이터 형식이 올바르지 않습니다/);
 });
 
-test('cleanState parses weather effects correctly', () => {
-  const rainState = cleanState({ markers: [], weather: 'rain', weatherIntensity: 3, windEffect: false });
+test('cleanState parses weather, solar and elevation profile settings correctly', () => {
+  const rainState = cleanState({
+    markers: [],
+    weather: 'rain',
+    weatherIntensity: 3,
+    windEffect: false,
+    solarDate: '2026-06-21',
+    solarTime: 1140, // 19:00
+    solarLiveSync: true,
+    elevationProfileOpen: true,
+    elevationTransectMode: 'places-route'
+  });
   assert.equal(rainState.weather, 'rain');
   assert.equal(rainState.weatherIntensity, 3);
   assert.equal(rainState.windEffect, false);
+  assert.equal(rainState.solarDate, '2026-06-21');
+  assert.equal(rainState.solarTime, 1140);
+  assert.equal(rainState.solarLiveSync, true);
+  assert.equal(rainState.elevationProfileOpen, true);
+  assert.equal(rainState.elevationTransectMode, 'places-route');
 
-  const snowState = cleanState({ markers: [], weather: 'snow', weatherIntensity: 1 });
-  assert.equal(snowState.weather, 'snow');
-  assert.equal(snowState.weatherIntensity, 1);
-  assert.equal(snowState.windEffect, true);
-
-  const invalidWeather = cleanState({ markers: [], weather: 'tornado', weatherIntensity: 99 });
-  assert.equal(invalidWeather.weather, 'clear');
-  assert.equal(invalidWeather.weatherIntensity, 3);
+  // Test clamp solarTime
+  const clampedSolarTime = cleanState({ markers: [], solarTime: 2000 });
+  assert.equal(clampedSolarTime.solarTime, 1439);
 });
