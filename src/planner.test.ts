@@ -47,7 +47,7 @@ function cleanState(raw: any, bounds = REGIONS.jeju.bounds) {
     weatherIntensity: Math.min(3, Math.max(1, Number(raw.weatherIntensity) || 2)),
     windEffect: raw.windEffect !== false,
     solarDate: typeof raw.solarDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.solarDate) ? raw.solarDate : '2026-11-10',
-    solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 720,
+    solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 810,
     solarLiveSync: Boolean(raw.solarLiveSync),
     elevationProfileOpen: Boolean(raw.elevationProfileOpen),
     elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east'
@@ -152,4 +152,88 @@ test('cleanState parses weather, solar and elevation profile settings correctly'
   // Test clamp solarTime
   const clampedSolarTime = cleanState({ markers: [], solarTime: 2000 });
   assert.equal(clampedSolarTime.solarTime, 1439);
+});
+
+export function buildShareUrl(originPath: string, options: {
+  region: string;
+  camera?: { pos: [number, number, number]; target: [number, number, number] };
+  view?: string;
+  selectedId?: string | null;
+  mapStyle?: string;
+  heightScale?: number;
+  weather?: string;
+  solarTime?: number;
+  solarDate?: string;
+  elevationProfileOpen?: boolean;
+  places?: string[];
+}): string {
+  const url = new URL(originPath, 'https://example.com');
+  url.searchParams.set('region', options.region);
+  if (options.camera) {
+    const p = options.camera.pos;
+    const t = options.camera.target;
+    url.searchParams.set('cam', `${p[0].toFixed(1)},${p[1].toFixed(1)},${p[2].toFixed(1)},${t[0].toFixed(1)},${t[1].toFixed(1)},${t[2].toFixed(1)}`);
+  }
+  if (options.view && options.view !== 'perspective') url.searchParams.set('view', options.view);
+  if (options.selectedId) url.searchParams.set('sel', options.selectedId);
+  if (options.mapStyle && options.mapStyle !== 'natural') url.searchParams.set('style', options.mapStyle);
+  if (options.heightScale && options.heightScale !== 100) url.searchParams.set('height', String(options.heightScale));
+  if (options.weather && options.weather !== 'clear') url.searchParams.set('weather', options.weather);
+  if (options.solarTime !== undefined && options.solarTime !== 810) url.searchParams.set('time', String(Math.round(options.solarTime)));
+  if (options.solarDate && options.solarDate !== '2026-11-10') url.searchParams.set('date', options.solarDate);
+  if (options.elevationProfileOpen) url.searchParams.set('elev', '1');
+  if (options.places && options.places.length > 0) url.searchParams.set('places', options.places.join(','));
+  return url.toString();
+}
+
+export function parseShareParams(queryString: string): any {
+  const params = new URLSearchParams(queryString);
+  const result: any = {};
+  if (params.has('region')) result.region = params.get('region');
+  if (params.has('cam')) {
+    const parts = params.get('cam')!.split(',').map(Number);
+    if (parts.length === 6 && parts.every(Number.isFinite)) {
+      result.camera = {
+        pos: [parts[0], parts[1], parts[2]],
+        target: [parts[3], parts[4], parts[5]]
+      };
+    }
+  }
+  if (params.has('view')) result.view = params.get('view');
+  if (params.has('sel')) result.selectedId = params.get('sel');
+  if (params.has('style')) result.mapStyle = params.get('style');
+  if (params.has('height')) result.heightScale = Number(params.get('height'));
+  if (params.has('weather')) result.weather = params.get('weather');
+  if (params.has('time')) result.solarTime = Number(params.get('time'));
+  if (params.has('date')) result.solarDate = params.get('date');
+  if (params.has('elev')) result.elevationProfileOpen = params.get('elev') === '1' || params.get('elev') === 'true';
+  if (params.has('places')) result.places = params.get('places')!.split(',');
+  return result;
+}
+
+test('buildShareUrl and parseShareParams correctly encode and decode 3D view state', () => {
+  const url = buildShareUrl('/', {
+    region: 'incheon',
+    camera: { pos: [34.5, 67.8, -90.1], target: [0, -15, 0] },
+    selectedId: 'incheon-bridge',
+    places: ['incheon-airport', 'incheon-bridge', 'songdo-central'],
+    weather: 'rain',
+    solarTime: 1080,
+    elevationProfileOpen: true
+  });
+
+  const parsedUrl = new URL(url);
+  assert.equal(parsedUrl.searchParams.get('region'), 'incheon');
+  assert.equal(parsedUrl.searchParams.get('sel'), 'incheon-bridge');
+  assert.equal(parsedUrl.searchParams.get('cam'), '34.5,67.8,-90.1,0.0,-15.0,0.0');
+
+  const decoded = parseShareParams(parsedUrl.search);
+  assert.equal(decoded.region, 'incheon');
+  assert.equal(decoded.selectedId, 'incheon-bridge');
+  assert.deepEqual(decoded.camera.pos, [34.5, 67.8, -90.1]);
+  assert.deepEqual(decoded.camera.target, [0, -15, 0]);
+  assert.deepEqual(decoded.places, ['incheon-airport', 'incheon-bridge', 'songdo-central']);
+  assert.equal(decoded.weather, 'rain');
+  assert.equal(decoded.solarTime, 1080);
+  assert.equal(decoded.elevationProfileOpen, true);
 });

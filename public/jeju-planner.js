@@ -114,7 +114,7 @@
     windEffect: true,
     soundEnabled: false,
     solarDate: '2026-11-10',
-    solarTime: 1035, // 17:15 KST
+    solarTime: 810, // 13:30 KST (밝고 화창한 오후 한낮)
     solarLiveSync: false,
     elevationProfileOpen: false,
     elevationTransectMode: 'west-east'
@@ -153,7 +153,7 @@
       windEffect: raw.windEffect !== false,
       soundEnabled: Boolean(raw.soundEnabled),
       solarDate: typeof raw.solarDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.solarDate) ? raw.solarDate : '2026-11-10',
-      solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 1035,
+      solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 810,
       solarLiveSync: Boolean(raw.solarLiveSync),
       elevationProfileOpen: Boolean(raw.elevationProfileOpen),
       elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east'
@@ -163,13 +163,126 @@
   function loadState(region) {
     try {
       const saved = localStorage.getItem(region.storageKey);
-      return saved ? cleanState(JSON.parse(saved), region) : defaultState(region);
+      if (!saved) return defaultState(region);
+      const parsed = JSON.parse(saved);
+      // Migrate previous 17:15 dusk default to bright afternoon 13:30
+      if (parsed.solarTime === 1035) {
+        parsed.solarTime = 810;
+      }
+      return cleanState(parsed, region);
     } catch (_) {
       return defaultState(region);
     }
   }
 
+  let pendingSharedCamera = null;
+
+  function applyUrlParams() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (!params.toString()) return;
+
+      const urlRegion = params.get('region');
+      if (urlRegion && REGIONS[urlRegion]) {
+        currentRegionId = urlRegion;
+      }
+
+      state = loadState(getRegion());
+
+      if (params.has('style')) {
+        const s = params.get('style');
+        if (s === 'elevation' || s === 'natural') state.mapStyle = s;
+      }
+
+      if (params.has('height')) {
+        const h = Number(params.get('height'));
+        if (Number.isFinite(h)) state.heightScale = Math.min(180, Math.max(40, h));
+      }
+
+      if (params.has('weather')) {
+        const w = params.get('weather');
+        if (['clear', 'rain', 'snow', 'mist'].includes(w)) state.weather = w;
+      }
+
+      if (params.has('time')) {
+        const t = Number(params.get('time'));
+        if (Number.isFinite(t)) state.solarTime = Math.max(0, Math.min(1439, t));
+      }
+
+      if (params.has('date')) {
+        const d = params.get('date');
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) state.solarDate = d;
+      }
+
+      if (params.has('elev')) {
+        state.elevationProfileOpen = params.get('elev') === '1' || params.get('elev') === 'true';
+      }
+
+      if (params.has('transect')) {
+        const tr = params.get('transect');
+        if (['west-east', 'north-south', 'places-route'].includes(tr)) state.elevationTransectMode = tr;
+      }
+
+      if (params.has('places') || params.has('custom')) {
+        const restored = [];
+        const r = getRegion();
+        if (params.has('places')) {
+          const ids = params.get('places').split(',');
+          ids.forEach((id) => {
+            const preset = r.presets.find((p) => p.id === id);
+            if (preset && !restored.some((item) => item.id === preset.id)) {
+              restored.push({ ...preset, custom: false });
+            }
+          });
+        }
+        if (params.has('custom')) {
+          const customStrs = params.get('custom').split(';');
+          customStrs.forEach((item, idx) => {
+            const [rawName, latStr, lngStr] = item.split(':');
+            const lat = Number(latStr);
+            const lng = Number(lngStr);
+            if (rawName && Number.isFinite(lat) && Number.isFinite(lng)) {
+              restored.push({
+                id: `custom-shared-${idx}-${Date.now()}`,
+                name: decodeURIComponent(rawName),
+                category: '공유 장소',
+                lat,
+                lng,
+                custom: true
+              });
+            }
+          });
+        }
+        if (restored.length > 0) {
+          state.markers = restored;
+        }
+      }
+
+      if (params.has('sel')) {
+        state.selectedId = params.get('sel');
+      }
+
+      if (params.has('cam')) {
+        const parts = params.get('cam').split(',').map(Number);
+        if (parts.length === 6 && parts.every(Number.isFinite)) {
+          pendingSharedCamera = {
+            pos: new THREE.Vector3(parts[0], parts[1], parts[2]),
+            target: new THREE.Vector3(parts[3], parts[4], parts[5])
+          };
+        }
+      }
+
+      if (params.has('view')) {
+        const v = params.get('view');
+        if (v === 'top' || v === 'perspective') viewMode = v;
+      }
+    } catch (e) {
+      console.warn('URL 파라미터 파싱 실패:', e);
+    }
+  }
+
   let state = loadState(getRegion());
+  applyUrlParams();
   const undoStack = [];
   const redoStack = [];
 
@@ -548,6 +661,119 @@
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast('지도를 파일로 저장했어요.');
+  }
+
+  function generateShareUrl() {
+    const url = new URL(window.location.origin + window.location.pathname);
+    url.searchParams.set('region', currentRegionId);
+
+    if (camera && controls) {
+      const p = camera.position;
+      const t = controls.target;
+      const camStr = `${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)},${t.x.toFixed(1)},${t.y.toFixed(1)},${t.z.toFixed(1)}`;
+      url.searchParams.set('cam', camStr);
+    }
+
+    if (viewMode && viewMode !== 'perspective') {
+      url.searchParams.set('view', viewMode);
+    }
+
+    if (state.selectedId) {
+      url.searchParams.set('sel', state.selectedId);
+    }
+
+    if (state.mapStyle && state.mapStyle !== 'natural') {
+      url.searchParams.set('style', state.mapStyle);
+    }
+
+    if (state.heightScale && state.heightScale !== 100) {
+      url.searchParams.set('height', String(state.heightScale));
+    }
+
+    if (state.weather && state.weather !== 'clear') {
+      url.searchParams.set('weather', state.weather);
+    }
+
+    if (state.solarTime !== undefined && state.solarTime !== 810) {
+      url.searchParams.set('time', String(Math.round(state.solarTime)));
+    }
+
+    if (state.solarDate && state.solarDate !== '2026-11-10') {
+      url.searchParams.set('date', state.solarDate);
+    }
+
+    if (state.elevationProfileOpen) {
+      url.searchParams.set('elev', '1');
+      if (state.elevationTransectMode && state.elevationTransectMode !== 'west-east') {
+        url.searchParams.set('transect', state.elevationTransectMode);
+      }
+    }
+
+    if (state.markers && state.markers.length > 0) {
+      const presetIds = [];
+      const customItems = [];
+      state.markers.forEach((m) => {
+        if (m.custom) {
+          customItems.push(`${encodeURIComponent(m.name)}:${m.lat.toFixed(4)}:${m.lng.toFixed(4)}`);
+        } else {
+          presetIds.push(m.id);
+        }
+      });
+      if (presetIds.length > 0) url.searchParams.set('places', presetIds.join(','));
+      if (customItems.length > 0) url.searchParams.set('custom', customItems.join(';'));
+    }
+
+    return url.toString();
+  }
+
+  function openShareDialog(url) {
+    const dialog = $('#share-dialog');
+    const input = $('#share-url-input');
+    if (!dialog || !input) return;
+    input.value = url;
+    dialog.hidden = false;
+    input.focus();
+    input.select();
+  }
+
+  function closeShareDialog() {
+    const dialog = $('#share-dialog');
+    if (dialog) dialog.hidden = true;
+  }
+
+  async function shareCurrentView() {
+    const shareUrl = generateShareUrl();
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        copied = true;
+      }
+    } catch (_) {
+      copied = false;
+    }
+
+    if (!copied) {
+      try {
+        const temp = document.createElement('textarea');
+        temp.value = shareUrl;
+        temp.style.position = 'fixed';
+        temp.style.opacity = '0';
+        document.body.appendChild(temp);
+        temp.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(temp);
+      } catch (_) {
+        copied = false;
+      }
+    }
+
+    if (copied) {
+      showToast('🔗 현재 3D 지도 뷰 링크를 클립보드에 복사했어요!');
+    } else {
+      openShareDialog(shareUrl);
+      showToast('공유 링크가 생성되었습니다. 링크를 복사해주세요.');
+    }
   }
 
   function setView(mode) {
@@ -957,6 +1183,42 @@
     $('#remove-selection').addEventListener('click', () => removeMarker(state.selectedId));
     $('#save-plan').addEventListener('click', savePlan);
     $('#bottom-save').addEventListener('click', savePlan);
+    const shareBtn = $('#share-view');
+    if (shareBtn) shareBtn.addEventListener('click', shareCurrentView);
+    const shareDialogClose = $('#share-dialog-close');
+    if (shareDialogClose) shareDialogClose.addEventListener('click', closeShareDialog);
+    const shareCopyBtn = $('#share-copy-btn');
+    if (shareCopyBtn) {
+      shareCopyBtn.addEventListener('click', async () => {
+        const input = $('#share-url-input');
+        if (!input) return;
+        input.select();
+        let copySuccess = false;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(input.value);
+            copySuccess = true;
+          }
+        } catch (_) {}
+        if (!copySuccess) {
+          try {
+            copySuccess = document.execCommand('copy');
+          } catch (_) {}
+        }
+        if (copySuccess) {
+          showToast('🔗 현재 3D 지도 뷰 링크를 클립보드에 복사했어요!');
+          setTimeout(closeShareDialog, 1000);
+        } else {
+          showToast('Ctrl+C 또는 길게 눌러 URL을 복사해주세요.');
+        }
+      });
+    }
+    const shareDialog = $('#share-dialog');
+    if (shareDialog) {
+      shareDialog.addEventListener('click', (e) => {
+        if (e.target === shareDialog) closeShareDialog();
+      });
+    }
     $('#open-plan').addEventListener('click', () => $('#plan-file').click());
     $('#guide-open-plan').addEventListener('click', () => $('#plan-file').click());
     $('#plan-file').addEventListener('change', async (event) => {
@@ -1816,7 +2078,7 @@
     if (ocean) disposeObject(ocean);
     ocean = new THREE.Mesh(
       new THREE.BoxGeometry(r.oceanBox[0], r.oceanBox[1], r.oceanBox[2]),
-      new THREE.MeshStandardMaterial({ color: 0x144e78, roughness: 0.28, metalness: 0.12, toneMapped: true })
+      new THREE.MeshStandardMaterial({ color: 0x196395, roughness: 0.22, metalness: 0.15, toneMapped: true })
     );
     ocean.position.y = -2.05;
     ocean.receiveShadow = true;
@@ -2138,7 +2400,7 @@
     const h = Math.floor(state.solarTime / 60);
     const m = Math.floor(state.solarTime % 60);
     const clockStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    const clockEl = $('#solar-clock-display');
+    const clockEl = $('#solar-clock-display') || $('#solar-time-clock');
     if (clockEl) clockEl.textContent = clockStr;
 
     const srH = Math.floor(solar.sunriseMinutes / 60);
@@ -2160,7 +2422,7 @@
         badge.style.background = '#fef3c7';
         badge.style.color = '#92400e';
       } else if (solar.elevationDeg > 12) {
-        badge.textContent = '낮 (일조 중)';
+        badge.textContent = '한낮 (화창한 일조)';
         badge.style.background = '#e0f2fe';
         badge.style.color = '#0369a1';
       } else if (solar.elevationDeg > 0) {
@@ -2201,25 +2463,27 @@
     const elev = solar.elevationDeg;
 
     if (elev > 0) {
-      const sunRatio = Math.min(1, elev / 45);
+      const sunRatio = Math.min(1, elev / 38);
+      // Clean, bright, realistic sunlight
       const sunR = THREE.MathUtils.lerp(1.0, 1.0, sunRatio);
-      const sunG = THREE.MathUtils.lerp(0.58, 0.98, sunRatio);
-      const sunB = THREE.MathUtils.lerp(0.24, 0.94, sunRatio);
+      const sunG = THREE.MathUtils.lerp(0.70, 0.99, sunRatio);
+      const sunB = THREE.MathUtils.lerp(0.40, 0.98, sunRatio);
       sunLight.color.setRGB(sunR, sunG, sunB);
-      sunLight.intensity = THREE.MathUtils.lerp(0.35, 1.15, Math.min(1, elev / 18));
+      sunLight.intensity = THREE.MathUtils.lerp(0.65, 1.35, Math.min(1, elev / 14));
       sunLight.castShadow = true;
 
-      const ambR = THREE.MathUtils.lerp(0.55, 0.86, sunRatio);
-      const ambG = THREE.MathUtils.lerp(0.48, 0.94, sunRatio);
-      const ambB = THREE.MathUtils.lerp(0.52, 0.98, sunRatio);
+      // Bright, luminous sky ambient fill
+      const ambR = THREE.MathUtils.lerp(0.72, 0.94, sunRatio);
+      const ambG = THREE.MathUtils.lerp(0.68, 0.97, sunRatio);
+      const ambB = THREE.MathUtils.lerp(0.74, 1.0, sunRatio);
       ambientLight.color.setRGB(ambR, ambG, ambB);
-      ambientLight.groundColor.setHex(0x5a6358);
-      ambientLight.intensity = THREE.MathUtils.lerp(0.42, 0.78, sunRatio);
+      ambientLight.groundColor.setHex(0x708076);
+      ambientLight.intensity = THREE.MathUtils.lerp(0.60, 0.98, sunRatio);
 
       if (renderer && state.weather === 'clear') {
-        const bgR = THREE.MathUtils.lerp(0.35, 0.93, sunRatio);
-        const bgG = THREE.MathUtils.lerp(0.30, 0.96, sunRatio);
-        const bgB = THREE.MathUtils.lerp(0.38, 0.97, sunRatio);
+        const bgR = THREE.MathUtils.lerp(0.65, 0.94, sunRatio);
+        const bgG = THREE.MathUtils.lerp(0.62, 0.97, sunRatio);
+        const bgB = THREE.MathUtils.lerp(0.72, 0.99, sunRatio);
         renderer.setClearColor(new THREE.Color(bgR, bgG, bgB), 1);
       }
 
@@ -2228,25 +2492,25 @@
     } else {
       const nightRatio = Math.min(1, -elev / 15);
 
-      sunLight.intensity = Math.max(0, 0.35 * (1 - nightRatio * 2));
+      sunLight.intensity = Math.max(0, 0.4 * (1 - nightRatio * 2));
       sunLight.castShadow = false;
 
       if (moonLight) {
-        moonLight.color.setHex(0x8dafd8);
-        moonLight.intensity = THREE.MathUtils.lerp(0.05, 0.42, nightRatio);
+        moonLight.color.setHex(0x9abce0);
+        moonLight.intensity = THREE.MathUtils.lerp(0.1, 0.45, nightRatio);
       }
 
-      const ambR = THREE.MathUtils.lerp(0.28, 0.06, nightRatio);
-      const ambG = THREE.MathUtils.lerp(0.20, 0.08, nightRatio);
-      const ambB = THREE.MathUtils.lerp(0.32, 0.16, nightRatio);
+      const ambR = THREE.MathUtils.lerp(0.35, 0.12, nightRatio);
+      const ambG = THREE.MathUtils.lerp(0.28, 0.15, nightRatio);
+      const ambB = THREE.MathUtils.lerp(0.42, 0.24, nightRatio);
       ambientLight.color.setRGB(ambR, ambG, ambB);
-      ambientLight.groundColor.setHex(0x060910);
-      ambientLight.intensity = THREE.MathUtils.lerp(0.40, 0.28, nightRatio);
+      ambientLight.groundColor.setHex(0x0a101b);
+      ambientLight.intensity = THREE.MathUtils.lerp(0.48, 0.36, nightRatio);
 
       if (renderer && state.weather === 'clear') {
-        const bgR = THREE.MathUtils.lerp(0.22, 0.03, nightRatio);
-        const bgG = THREE.MathUtils.lerp(0.18, 0.05, nightRatio);
-        const bgB = THREE.MathUtils.lerp(0.28, 0.09, nightRatio);
+        const bgR = THREE.MathUtils.lerp(0.25, 0.04, nightRatio);
+        const bgG = THREE.MathUtils.lerp(0.20, 0.06, nightRatio);
+        const bgB = THREE.MathUtils.lerp(0.32, 0.10, nightRatio);
         renderer.setClearColor(new THREE.Color(bgR, bgG, bgB), 1);
       }
 
@@ -2583,10 +2847,10 @@
     camera = new THREE.PerspectiveCamera(42, 1, 0.1, 1000);
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setClearColor(0xeef5f8, 1);
+    renderer.setClearColor(0xf0f6fb, 1);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMappingExposure = 1.28;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     canvasContainer.append(renderer.domElement);
@@ -2601,9 +2865,9 @@
     controls.enablePan = true;
 
     // Warm sun key light and cool sky hemisphere fill
-    ambientLight = new THREE.HemisphereLight(0xdcf0fb, 0x6e7b75, 0.76);
+    ambientLight = new THREE.HemisphereLight(0xdcf0fb, 0x768780, 0.92);
     scene.add(ambientLight);
-    sunLight = new THREE.DirectionalLight(0xfff8ee, 0.95);
+    sunLight = new THREE.DirectionalLight(0xfff8ee, 1.30);
     sunLight.position.set(-35, 85, 45);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.set(2048, 2048);
@@ -2628,11 +2892,20 @@
     // Build weather systems
     buildWeatherSystems();
 
-    // Prepare initial region assets (Jeju)
-    await prepareRegionAssets('jeju');
+    // Prepare initial region assets
+    await prepareRegionAssets(currentRegionId);
 
     rebuildRegionScene();
-    setView('perspective');
+    setView(viewMode);
+    if (pendingSharedCamera && camera && controls) {
+      camera.position.copy(pendingSharedCamera.pos);
+      controls.target.copy(pendingSharedCamera.target);
+      controls.update();
+      pendingSharedCamera = null;
+    }
+    if (state.selectedId) {
+      selectMarker(state.selectedId);
+    }
     $('#loading').hidden = true;
     renderState();
 
@@ -2695,6 +2968,11 @@
     };
     animate();
   }
+
+  window.generateShareUrl = generateShareUrl;
+  window.openShareDialog = openShareDialog;
+  window.closeShareDialog = closeShareDialog;
+  window.shareCurrentView = shareCurrentView;
 
   initUI();
   initScene().catch((error) => {

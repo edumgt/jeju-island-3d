@@ -65,6 +65,7 @@
         <span id="save-status" class="save-status">● 자동 저장</span>
         <button id="open-plan" class="text-button" type="button">지도 열기</button>
         <button id="reset-plan" class="text-button" type="button">처음부터</button>
+        <button id="share-view" class="text-button share-button" type="button" title="현재 3D 지도 뷰와 장소를 URL 링크로 복사하여 공유"><span class="share-icon" aria-hidden="true">🔗</span> 공유하기</button>
         <button id="save-plan" class="primary-button top-save" type="button">지도 저장 <span aria-hidden="true">↗</span></button>
         <input id="plan-file" type="file" accept="application/json,.json" hidden>
       </div>
@@ -201,8 +202,8 @@
 
               <div class="solar-time-row">
                 <div class="solar-time-display">
-                  <span id="solar-time-clock" class="solar-clock">17:15</span>
-                  <span id="solar-phase-badge" class="solar-badge sunset-badge">🌇 일몰·골든아워</span>
+                  <span id="solar-time-clock" class="solar-clock">13:30</span>
+                  <span id="solar-phase-badge" class="solar-badge noon-badge">☀️ 한낮 (화창한 일조)</span>
                 </div>
                 <div class="solar-controls">
                   <button type="button" id="solar-play-btn" class="solar-play-button" title="태양 궤적 24시간 재생">▶ 재생</button>
@@ -214,7 +215,7 @@
                 </div>
               </div>
 
-              <input id="solar-time-slider" class="range-input solar-slider" type="range" min="0" max="1439" step="1" value="1035" aria-label="시간대 조절">
+              <input id="solar-time-slider" class="range-input solar-slider" type="range" min="0" max="1439" step="1" value="810" aria-label="시간대 조절">
               <div class="range-ends"><span>00:00 (밤)</span><span>12:00 (정오)</span><span>23:59 (밤)</span></div>
 
               <div class="solar-presets">
@@ -347,7 +348,21 @@
           <button id="bottom-save" class="primary-button bottom-save" type="button">지도 저장 <span aria-hidden="true">→</span></button>
         </div>
 
-        <div class="map-credit">© <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a> · <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen Terrain Tiles</a> / SRTM · USGS · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>
+        <!-- Share URL Modal Dialog -->
+        <div id="share-dialog" class="share-dialog-overlay" hidden>
+          <div class="share-dialog-card" role="dialog" aria-labelledby="share-dialog-title" aria-modal="true">
+            <div class="share-dialog-header">
+              <strong id="share-dialog-title">🔗 3D 지도 뷰 링크 공유</strong>
+              <button type="button" id="share-dialog-close" class="elev-close-btn" aria-label="닫기">×</button>
+            </div>
+            <p>현재 3D 카메라 앵글, 선택된 장소 및 설정이 포함된 링크입니다. 친구에게 복사하여 공유하세요.</p>
+            <div class="share-input-wrap">
+              <input type="text" id="share-url-input" readonly aria-label="공유 링크 URL">
+              <button type="button" id="share-copy-btn" class="primary-button">복사</button>
+            </div>
+          </div>
+        </div>
+
         <div id="toast" class="toast" role="status" aria-live="polite"></div>
       </section>
     </main>
