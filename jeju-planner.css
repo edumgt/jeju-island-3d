@@ -194,6 +194,10 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .viewer-title > span:last-child { color: #91a1af; font-size: 11px; }
 .viewer-tip { position: absolute; top: 32px; right: 34px; z-index: 4; color: #76909e; font-size: 11px; pointer-events: none; }
 .viewer-tip span { font-size: 17px; vertical-align: middle; }
+body.is-night-sky .viewer-kicker { color: #cbd5e1; }
+body.is-night-sky .viewer-title strong { color: #f8fafc; text-shadow: 0 2px 10px rgba(15, 23, 42, 0.55); }
+body.is-night-sky .viewer-title > span:last-child { color: #cbd5e1; }
+body.is-night-sky .viewer-tip { color: #cbd5e1; }
 .pick-instruction { position: absolute; z-index: 6; top: 25px; left: 50%; transform: translateX(-50%); white-space: nowrap; padding: 11px 14px; border: 1px solid #c9def1; border-radius: 8px; background: white; box-shadow: 0 8px 23px rgba(39, 72, 93, .12); color: #24465f; font-size: 12px; font-weight: 800; }
 .pick-instruction button { border: 0; background: transparent; color: #1769c1; font-size: 11px; font-weight: 800; margin-left: 9px; }
 .view-tools { position: absolute; z-index: 4; right: 24px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 3px; padding: 7px; background: white; border: 1px solid #e9eef1; border-radius: 12px; box-shadow: 0 8px 25px rgba(44, 71, 85, .12); }
@@ -214,8 +218,11 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .selection-coordinates { display: block; color: #96a4ae; font-size: 11px; }
 .selection-close { position: absolute; top: 8px; right: 10px; width: 24px; height: 24px; border: 0; border-radius: 50%; color: #9da9b3; background: transparent; font-size: 19px; }
 .selection-close:hover { background: #eef3f6; color: #24465f; }
-.selection-remove { border: 0; background: transparent; color: #1769c1; padding: 10px 0 0; font-size: 11px; font-weight: 800; }
-.selection-remove:hover { text-decoration: underline; }
+.selection-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; }
+.selection-focus { border: 0; border-radius: 6px; background: #e8f2fc; color: #1769c1; padding: 5px 9px; font-size: 11px; font-weight: 800; cursor: pointer; transition: background .15s; }
+.selection-focus:hover { background: #d5e8fa; }
+.selection-remove { border: 0; background: transparent; color: #64748b; padding: 5px 0; font-size: 11px; font-weight: 700; cursor: pointer; }
+.selection-remove:hover { color: #dc2626; text-decoration: underline; }
 .bottom-toolbar { position: absolute; z-index: 4; left: 26px; right: 26px; bottom: 30px; min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 12px; background: rgba(255,255,255,.97); border: 1px solid #e9eef1; border-radius: 13px; box-shadow: 0 10px 32px rgba(47, 75, 91, .13); }
 .bottom-tools { display: flex; align-items: center; gap: 4px; }
 .bottom-tools button { width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 8px; color: #4c6173; background: transparent; font-size: 21px; }
@@ -668,3 +675,55 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   from { transform: scale(0.95); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+
+/* Terrain Mesh Optimization Selector */
+.mesh-quality-group {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mesh-quality-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 3px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+}
+.mesh-quality-option {
+  position: relative;
+  cursor: pointer;
+}
+.mesh-quality-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.mesh-quality-option span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #475569;
+  transition: all .15s ease;
+}
+.mesh-quality-option input:checked + span {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+}
+.mesh-quality-option:hover span {
+  color: #0f172a;
+}
+.mesh-quality-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #64748b;
+}
+

@@ -117,7 +117,8 @@
     solarTime: 810, // 13:30 KST (밝고 화창한 오후 한낮)
     solarLiveSync: false,
     elevationProfileOpen: false,
-    elevationTransectMode: 'west-east'
+    elevationTransectMode: 'west-east',
+    terrainDetail: 'adaptive'
   });
 
   function cleanState(raw, region) {
@@ -156,7 +157,8 @@
       solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 810,
       solarLiveSync: Boolean(raw.solarLiveSync),
       elevationProfileOpen: Boolean(raw.elevationProfileOpen),
-      elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east'
+      elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east',
+      terrainDetail: ['adaptive', 'high', 'eco'].includes(raw.terrainDetail) ? raw.terrainDetail : 'adaptive'
     };
   }
 
@@ -192,6 +194,11 @@
       if (params.has('style')) {
         const s = params.get('style');
         if (s === 'elevation' || s === 'natural') state.mapStyle = s;
+      }
+
+      if (params.has('mesh')) {
+        const md = params.get('mesh');
+        if (['adaptive', 'high', 'eco'].includes(md)) state.terrainDetail = md;
       }
 
       if (params.has('height')) {
@@ -301,17 +308,25 @@
   let windGain = null;
   let ambientNoiseNode = null;
 
-  // Incheon Bridge & Night Stars & Elevation Indicator
+  // Incheon Bridge, Airport & Night Stars & Elevation Indicator
   let incheonBridgeGroup = null;
+  let incheonAirportGroup = null;
+  let airportAnimPlane = null;
+  let airportFlightCurve = null;
+  let airportFlightPhase = 0;
+  let airportEmissiveMaterials = [];
   let starsPoints = null;
   let starsGeo = null;
   let elevationPointerMesh = null;
   let solarPlaying = false;
   let solarSpeed = 10;
   let currentSolarPosition = null;
+  let cameraFlyTarget = null;
+  const _planePos = new THREE.Vector3();
+  const _planeNextPos = new THREE.Vector3();
 
   let regionCaches = {}; // Caches for heightData, textures, outline, roads per region
-  let renderedHeightScale, renderedMapStyle, renderedWeather;
+  let renderedHeightScale, renderedMapStyle, renderedWeather, renderedTerrainDetail;
   let markerObjects = [];
   let markerHits = [];
   let viewMode = 'perspective';
@@ -405,6 +420,7 @@
 
   function pointInLand(lat, lng) {
     if (currentRegionId === 'incheon') {
+      if (typeof window.inIncheonLand === 'function' && window.inIncheonLand(lng, lat)) return true;
       const yjDist = Math.hypot((lng - 126.475) / 0.125, (lat - 37.465) / 0.065);
       if (yjDist < 1.0) return true; // Yeongjongdo
       if (lng >= 126.600 && lng <= 126.675 && lat >= 37.360 && lat <= 37.415) return true; // Songdo
@@ -558,6 +574,8 @@
     $('#undo').disabled = undoStack.length === 0;
     $('#redo').disabled = redoStack.length === 0;
     $(`input[name="map-style"][value="${state.mapStyle}"]`).checked = true;
+    const meshRadio = $(`input[name="terrain-detail"][value="${state.terrainDetail}"]`);
+    if (meshRadio) meshRadio.checked = true;
     $('#height-scale').value = state.heightScale;
     $('#height-value').textContent = `${state.heightScale}%`;
     $('#toggle-labels').checked = state.showLabels;
@@ -601,11 +619,14 @@
 
     const cache = regionCaches[currentRegionId];
     if (terrain && cache && cache.textures) {
+      if (renderedTerrainDetail !== state.terrainDetail) {
+        buildTerrain();
+      }
       if (renderedMapStyle !== state.mapStyle) {
         terrain.material.map = cache.textures[state.mapStyle];
         if (cache.textures.normal && !terrain.material.normalMap) {
           terrain.material.normalMap = cache.textures.normal;
-          terrain.material.normalScale.set(1.15, 1.15);
+          terrain.material.normalScale.set(1.25, 1.25);
         }
         terrain.material.needsUpdate = true;
         renderedMapStyle = state.mapStyle;
@@ -623,6 +644,24 @@
     state.selectedId = id;
     renderState();
     persist();
+  }
+
+  function focusOnMarker(id) {
+    const marker = markerById(id);
+    if (!marker || !camera || !controls) return;
+    if (droneMode) setDroneMode(false);
+    viewMode = 'perspective';
+    camera.up.set(0, 1, 0);
+    const { x, z } = worldPosition(marker.lat, marker.lng);
+    const y = surfaceHeight(marker.lat, marker.lng);
+    const isAirport = id === 'incheon-airport' || id === 'incheon-t2' || id === 'incheon-tower';
+    const dx = isAirport ? 6.2 : 14;
+    const dy = isAirport ? 5.6 : 13;
+    const dz = isAirport ? 8.4 : 17;
+    cameraFlyTarget = {
+      target: new THREE.Vector3(x, y + (isAirport ? 0.45 : 0.8), z),
+      pos: new THREE.Vector3(x + dx, y + dy, z + dz)
+    };
   }
 
   function removeMarker(id) {
@@ -684,6 +723,10 @@
 
     if (state.mapStyle && state.mapStyle !== 'natural') {
       url.searchParams.set('style', state.mapStyle);
+    }
+
+    if (state.terrainDetail && state.terrainDetail !== 'adaptive') {
+      url.searchParams.set('mesh', state.terrainDetail);
     }
 
     if (state.heightScale && state.heightScale !== 100) {
@@ -779,6 +822,7 @@
   function setView(mode) {
     if (!camera || !controls) return;
     if (droneMode) setDroneMode(false);
+    cameraFlyTarget = null;
     viewMode = mode;
     const r = getRegion();
     const aspect = Math.max(0.4, viewer.clientWidth / Math.max(1, viewer.clientHeight));
@@ -796,8 +840,9 @@
 
   function zoom(factor) {
     if (!camera || !controls) return;
+    cameraFlyTarget = null;
     const offset = camera.position.clone().sub(controls.target).multiplyScalar(factor);
-    const distance = Math.max(28, Math.min(420, offset.length()));
+    const distance = Math.max(10, Math.min(420, offset.length()));
     offset.setLength(distance);
     camera.position.copy(controls.target).add(offset);
     controls.update();
@@ -1031,6 +1076,13 @@
         commit(() => { state.mapStyle = event.target.value; });
       });
     });
+    document.querySelectorAll('input[name="terrain-detail"]').forEach((radio) => {
+      radio.addEventListener('change', (event) => {
+        commit(() => { state.terrainDetail = event.target.value; });
+        const labels = { eco: '경량', adaptive: '적응형 정밀', high: '고밀도' };
+        showToast(`지형 메시: ${labels[event.target.value] || event.target.value}`);
+      });
+    });
     $('#height-scale').addEventListener('input', (event) => {
       $('#height-value').textContent = `${event.target.value}%`;
     });
@@ -1180,6 +1232,10 @@
     $('#undo').addEventListener('click', undo);
     $('#redo').addEventListener('click', redo);
     $('#close-selection').addEventListener('click', () => selectMarker(null));
+    const focusSelBtn = $('#focus-selection');
+    if (focusSelBtn) focusSelBtn.addEventListener('click', () => {
+      if (state.selectedId) focusOnMarker(state.selectedId);
+    });
     $('#remove-selection').addEventListener('click', () => removeMarker(state.selectedId));
     $('#save-plan').addEventListener('click', savePlan);
     $('#bottom-save').addEventListener('click', savePlan);
@@ -1290,6 +1346,8 @@
   async function prepareRegionAssets(regionId) {
     if (regionCaches[regionId]) return regionCaches[regionId];
 
+    const maxAniso = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+
     if (regionId === 'jeju') {
       const image = await loadImage(window.JEJU_ASSETS.height);
       const sourceCanvas = document.createElement('canvas');
@@ -1299,19 +1357,24 @@
       context.drawImage(image, 0, 0);
       const heightData = { width: image.width, height: image.height, pixels: context.getImageData(0, 0, image.width, image.height).data };
 
-      let natural, elevation, normal;
+      let natural, elevation, normal, roughness;
       if (typeof window.createRealisticJejuAssets === 'function') {
-        const { naturalCanvas, elevationCanvas, normalCanvas } = window.createRealisticJejuAssets(sourceCanvas, window.JEJU_OUTLINE);
+        const { naturalCanvas, elevationCanvas, normalCanvas, roughnessCanvas } = window.createRealisticJejuAssets(sourceCanvas, window.JEJU_OUTLINE);
         natural = new THREE.CanvasTexture(naturalCanvas);
         natural.encoding = THREE.sRGBEncoding;
-        natural.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        natural.anisotropy = maxAniso;
 
         elevation = new THREE.CanvasTexture(elevationCanvas);
         elevation.encoding = THREE.sRGBEncoding;
-        elevation.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        elevation.anisotropy = maxAniso;
 
         normal = new THREE.CanvasTexture(normalCanvas);
-        normal.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        normal.anisotropy = maxAniso;
+
+        if (roughnessCanvas) {
+          roughness = new THREE.CanvasTexture(roughnessCanvas);
+          roughness.anisotropy = maxAniso;
+        }
       } else {
         const [oldNat, oldElev] = await Promise.all([
           loadTexture(window.JEJU_ASSETS.natural),
@@ -1323,13 +1386,13 @@
 
       regionCaches.jeju = {
         heightData,
-        textures: { natural, elevation, normal }
+        textures: { natural, elevation, normal, roughness }
       };
     } else if (regionId === 'haeundae') {
       if (typeof window.createHaeundaeAssets !== 'function') {
         throw new Error('해운대 3D 에셋 생성기를 찾을 수 없습니다.');
       }
-      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas } = window.createHaeundaeAssets();
+      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas, roughnessCanvas } = window.createHaeundaeAssets();
       const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
       const heightData = {
         width: heightCanvas.width,
@@ -1339,27 +1402,31 @@
 
       const natural = new THREE.CanvasTexture(naturalCanvas);
       natural.encoding = THREE.sRGBEncoding;
-      natural.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      natural.anisotropy = maxAniso;
 
       const elevation = new THREE.CanvasTexture(elevationCanvas);
       elevation.encoding = THREE.sRGBEncoding;
-      elevation.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      elevation.anisotropy = maxAniso;
 
-      let normal;
+      let normal, roughness;
       if (normalCanvas) {
         normal = new THREE.CanvasTexture(normalCanvas);
-        normal.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        normal.anisotropy = maxAniso;
+      }
+      if (roughnessCanvas) {
+        roughness = new THREE.CanvasTexture(roughnessCanvas);
+        roughness.anisotropy = maxAniso;
       }
 
       regionCaches.haeundae = {
         heightData,
-        textures: { natural, elevation, normal }
+        textures: { natural, elevation, normal, roughness }
       };
     } else if (regionId === 'incheon') {
       if (typeof window.createIncheonAssets !== 'function') {
         throw new Error('인천 3D 에셋 생성기를 찾을 수 없습니다.');
       }
-      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas } = window.createIncheonAssets();
+      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas, roughnessCanvas } = window.createIncheonAssets();
       const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
       const heightData = {
         width: heightCanvas.width,
@@ -1369,21 +1436,25 @@
 
       const natural = new THREE.CanvasTexture(naturalCanvas);
       natural.encoding = THREE.sRGBEncoding;
-      natural.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      natural.anisotropy = maxAniso;
 
       const elevation = new THREE.CanvasTexture(elevationCanvas);
       elevation.encoding = THREE.sRGBEncoding;
-      elevation.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      elevation.anisotropy = maxAniso;
 
-      let normal;
+      let normal, roughness;
       if (normalCanvas) {
         normal = new THREE.CanvasTexture(normalCanvas);
-        normal.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        normal.anisotropy = maxAniso;
+      }
+      if (roughnessCanvas) {
+        roughness = new THREE.CanvasTexture(roughnessCanvas);
+        roughness.anisotropy = maxAniso;
       }
 
       regionCaches.incheon = {
         heightData,
-        textures: { natural, elevation, normal }
+        textures: { natural, elevation, normal, roughness }
       };
     }
 
@@ -1445,48 +1516,68 @@
     const cache = regionCaches[currentRegionId];
     if (!cache || !cache.textures) return;
 
-    const columns = 320;
-    const rows = 180;
-    const positions = new Float32Array((columns + 1) * (rows + 1) * 3);
-    const uvs = new Float32Array((columns + 1) * (rows + 1) * 2);
-    const indices = [];
+    const geometry = new THREE.BufferGeometry();
 
-    for (let row = 0; row <= rows; row++) {
-      for (let column = 0; column <= columns; column++) {
-        const index = row * (columns + 1) + column;
-        positions[index * 3] = (column / columns - 0.5) * r.mapWidth;
-        positions[index * 3 + 2] = (row / rows - 0.5) * r.mapDepth;
-        uvs[index * 2] = column / columns;
-        uvs[index * 2 + 1] = 1 - row / rows;
-        if (row < rows && column < columns) {
-          const next = index + columns + 1;
-          indices.push(index, next, index + 1, index + 1, next, next + 1);
+    if (window.TerrainOptimizer && typeof window.TerrainOptimizer.buildOptimizedTerrainGeometry === 'function') {
+      const optimized = window.TerrainOptimizer.buildOptimizedTerrainGeometry({
+        mapWidth: r.mapWidth,
+        mapDepth: r.mapDepth,
+        bounds: r.bounds,
+        sampleHeightMeters: heightAt,
+        regionId: currentRegionId,
+        quality: state.terrainDetail || 'adaptive'
+      });
+      geometry.setAttribute('position', new THREE.BufferAttribute(optimized.positions, 3));
+      geometry.setAttribute('uv', new THREE.BufferAttribute(optimized.uvs, 2));
+      geometry.setIndex(new THREE.BufferAttribute(optimized.indices, 1));
+      window.__lastTerrainStats = optimized.stats;
+    } else {
+      const columns = 320;
+      const rows = 180;
+      const positions = new Float32Array((columns + 1) * (rows + 1) * 3);
+      const uvs = new Float32Array((columns + 1) * (rows + 1) * 2);
+      const indices = [];
+
+      for (let row = 0; row <= rows; row++) {
+        for (let column = 0; column <= columns; column++) {
+          const index = row * (columns + 1) + column;
+          positions[index * 3] = (column / columns - 0.5) * r.mapWidth;
+          positions[index * 3 + 2] = (row / rows - 0.5) * r.mapDepth;
+          uvs[index * 2] = column / columns;
+          uvs[index * 2 + 1] = 1 - row / rows;
+          if (row < rows && column < columns) {
+            const next = index + columns + 1;
+            indices.push(index, next, index + 1, index + 1, next, next + 1);
+          }
         }
       }
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geometry.setIndex(indices);
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geometry.setIndex(indices);
 
     const matOptions = {
       map: cache.textures[state.mapStyle],
       transparent: true,
       alphaTest: 0.08,
       side: THREE.DoubleSide,
-      roughness: 0.82,
+      roughness: cache.textures.roughness ? 1.0 : 0.82,
       metalness: 0.04,
       polygonOffset: true,
       polygonOffsetFactor: -1
     };
     if (cache.textures.normal) {
       matOptions.normalMap = cache.textures.normal;
-      matOptions.normalScale = new THREE.Vector2(1.15, 1.15);
+      matOptions.normalScale = new THREE.Vector2(1.25, 1.25);
+    }
+    if (cache.textures.roughness) {
+      matOptions.roughnessMap = cache.textures.roughness;
     }
     terrain = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial(matOptions));
     terrain.receiveShadow = true;
     scene.add(terrain);
     renderedMapStyle = state.mapStyle;
+    renderedTerrainDetail = state.terrainDetail;
     updateTerrainHeight();
   }
 
@@ -1504,6 +1595,7 @@
     terrain.geometry.computeBoundingSphere();
     renderedHeightScale = state.heightScale;
     buildRoads();
+    if (currentRegionId === 'incheon') buildIncheonAirport();
   }
 
   function roadColor(type) {
@@ -1616,6 +1708,7 @@
       label.className = `map-label${marker.custom ? ' is-custom' : ''}${selected ? ' is-selected' : ''}`;
       label.textContent = marker.name;
       label.addEventListener('click', () => selectMarker(marker.id));
+      label.addEventListener('dblclick', () => focusOnMarker(marker.id));
       markerLayer.append(label);
       markerObjects.push({ marker, group, label });
     }
@@ -2096,6 +2189,7 @@
     buildTerrain();
     buildRoads();
     buildIncheonBridge();
+    buildIncheonAirport();
     syncMarkers();
     resetWeatherBounds();
   }
@@ -2239,6 +2333,612 @@
     }
 
     scene.add(incheonBridgeGroup);
+  }
+
+  function createAircraftMesh(livery = 'korean') {
+    const plane = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      roughness: 0.25,
+      metalness: 0.35
+    });
+    const tailColor = livery === 'korean' ? 0x0284c7 : (livery === 'asiana' ? 0x1e293b : 0xd97706);
+    const tailMat = new THREE.MeshStandardMaterial({
+      color: tailColor,
+      roughness: 0.32,
+      metalness: 0.25
+    });
+    const wingMat = new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0,
+      roughness: 0.32,
+      metalness: 0.45
+    });
+    const engineMat = new THREE.MeshStandardMaterial({
+      color: livery === 'korean' ? 0x38bdf8 : 0x475569,
+      roughness: 0.35,
+      metalness: 0.55
+    });
+    const cockpitMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      roughness: 0.12,
+      metalness: 0.65
+    });
+
+    // Fuselage (oriented along +Z nose forward)
+    const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.052, 0.44, 10), bodyMat);
+    fuselage.rotation.x = Math.PI / 2;
+    fuselage.castShadow = true;
+    plane.add(fuselage);
+
+    // Nose cone
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.11, 10), bodyMat);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = 0.275;
+    plane.add(nose);
+
+    // Cockpit visor
+    const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.045), cockpitMat);
+    cockpit.position.set(0, 0.032, 0.23);
+    plane.add(cockpit);
+
+    // Tail cone
+    const tailCone = new THREE.Mesh(new THREE.ConeGeometry(0.052, 0.12, 10), bodyMat);
+    tailCone.rotation.x = -Math.PI / 2;
+    tailCone.position.z = -0.28;
+    plane.add(tailCone);
+
+    // Swept Main Wings (left & right)
+    const wingShape = new THREE.Shape();
+    wingShape.moveTo(0, 0.08);
+    wingShape.lineTo(0.28, -0.09);
+    wingShape.lineTo(0.28, -0.14);
+    wingShape.lineTo(0, -0.04);
+    wingShape.closePath();
+    const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.014, bevelEnabled: false });
+    wingGeo.rotateX(Math.PI / 2);
+
+    const rightWing = new THREE.Mesh(wingGeo, wingMat);
+    rightWing.position.set(0.02, -0.01, 0.04);
+    rightWing.castShadow = true;
+    plane.add(rightWing);
+
+    const leftWing = rightWing.clone();
+    leftWing.scale.x = -1;
+    leftWing.position.set(-0.02, -0.01, 0.04);
+    plane.add(leftWing);
+
+    // Winglets
+    const wingletGeo = new THREE.BoxGeometry(0.01, 0.045, 0.045);
+    const rWinglet = new THREE.Mesh(wingletGeo, tailMat);
+    rWinglet.position.set(0.295, 0.015, -0.075);
+    rWinglet.rotation.z = -0.22;
+    plane.add(rWinglet);
+    const lWinglet = new THREE.Mesh(wingletGeo, tailMat);
+    lWinglet.position.set(-0.295, 0.015, -0.075);
+    lWinglet.rotation.z = 0.22;
+    plane.add(lWinglet);
+
+    // Twin Underwing Turbofans
+    const engGeo = new THREE.CylinderGeometry(0.024, 0.021, 0.095, 8);
+    engGeo.rotateX(Math.PI / 2);
+    const rEng = new THREE.Mesh(engGeo, engineMat);
+    rEng.position.set(0.11, -0.036, 0.05);
+    plane.add(rEng);
+    const lEng = new THREE.Mesh(engGeo, engineMat);
+    lEng.position.set(-0.11, -0.036, 0.05);
+    plane.add(lEng);
+
+    // Vertical Tail Stabilizer
+    const vTailShape = new THREE.Shape();
+    vTailShape.moveTo(0, 0);
+    vTailShape.lineTo(-0.08, 0.14);
+    vTailShape.lineTo(-0.14, 0.14);
+    vTailShape.lineTo(-0.10, 0);
+    vTailShape.closePath();
+    const vTailGeo = new THREE.ExtrudeGeometry(vTailShape, { depth: 0.014, bevelEnabled: false });
+    vTailGeo.rotateY(Math.PI / 2);
+    const vTail = new THREE.Mesh(vTailGeo, tailMat);
+    vTail.position.set(-0.007, 0.02, -0.18);
+    vTail.castShadow = true;
+    plane.add(vTail);
+
+    // Horizontal Tailplane
+    const hTail = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.012, 0.06), wingMat);
+    hTail.position.set(0, 0.02, -0.26);
+    plane.add(hTail);
+
+    return plane;
+  }
+
+  function buildIncheonAirport() {
+    if (incheonAirportGroup) {
+      disposeObject(incheonAirportGroup);
+      incheonAirportGroup = null;
+    }
+    airportAnimPlane = null;
+    airportFlightCurve = null;
+    airportEmissiveMaterials = [];
+
+    if (currentRegionId !== 'incheon') return;
+    const layout = window.INCHEON_AIRPORT_LAYOUT;
+    if (!layout) return;
+
+    incheonAirportGroup = new THREE.Group();
+    incheonAirportGroup.name = 'incheon-airport-complex';
+
+    function airportToWorld(uKm, vKm) {
+      const { lat, lng } = layout.toLatLng(uKm, vKm);
+      const { x, z } = worldPosition(lat, lng);
+      const y = surfaceHeight(lat, lng) + 0.035;
+      return { x, y, z };
+    }
+
+    const originW = airportToWorld(0, 0);
+    const uStep = airportToWorld(1, 0);
+    const vStep = airportToWorld(0, 1);
+    const uAngleY = Math.atan2(-(uStep.z - originW.z), uStep.x - originW.x);
+    const vAngleY = Math.atan2(-(vStep.x - originW.x), -(vStep.z - originW.z));
+
+    function setWorldPos(obj, uKm, vKm, dy = 0) {
+      const p = airportToWorld(uKm, vKm);
+      obj.position.set(p.x, p.y + dy, p.z);
+    }
+
+    // Shared PBR materials
+    const roofMetalMat = new THREE.MeshStandardMaterial({
+      color: 0xdce4ee,
+      roughness: 0.24,
+      metalness: 0.68
+    });
+    const darkRoofTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x64748b,
+      roughness: 0.42,
+      metalness: 0.48
+    });
+    const glassCurtainMat = new THREE.MeshStandardMaterial({
+      color: 0x2c6a9e,
+      roughness: 0.14,
+      metalness: 0.48,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 0.12
+    });
+    airportEmissiveMaterials.push({ mat: glassCurtainMat, dayInt: 0.12, nightInt: 0.65 });
+
+    const warmAtriumGlassMat = new THREE.MeshStandardMaterial({
+      color: 0x7dd3fc,
+      roughness: 0.16,
+      metalness: 0.35,
+      emissive: 0xfcd34d,
+      emissiveIntensity: 0.16
+    });
+    airportEmissiveMaterials.push({ mat: warmAtriumGlassMat, dayInt: 0.16, nightInt: 0.85 });
+
+    const concreteMat = new THREE.MeshStandardMaterial({
+      color: 0xcbd5e1,
+      roughness: 0.72,
+      metalness: 0.08
+    });
+    const jetbridgeMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      roughness: 0.38,
+      metalness: 0.55
+    });
+
+    // Helper: create curved gull-wing terminal roof extrusion
+    function createArchedRoofGeo(width, depth, thickness, archHeight) {
+      const shape = new THREE.Shape();
+      const hw = width * 0.5;
+      shape.moveTo(-hw, 0);
+      shape.quadraticCurveTo(0, archHeight, hw, 0);
+      shape.lineTo(hw, -thickness);
+      shape.quadraticCurveTo(0, archHeight - thickness, -hw, -thickness);
+      shape.closePath();
+      const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 16 });
+      geo.translate(0, 0, -depth * 0.5);
+      return geo;
+    }
+
+    // ------------------------------------------------------------
+    // 1. TERMINAL 1 (제1여객터미널) - Sweeping Gull-Wing + Pier Wings
+    // ------------------------------------------------------------
+    const t1Group = new THREE.Group();
+    setWorldPos(t1Group, 0.16, -1.04, 0);
+    t1Group.rotation.y = uAngleY;
+
+    const t1CoreGlass = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.34, 0.68), glassCurtainMat);
+    t1CoreGlass.position.y = 0.17;
+    t1CoreGlass.castShadow = true;
+    t1CoreGlass.receiveShadow = true;
+    t1Group.add(t1CoreGlass);
+
+    const t1RoofGeo = createArchedRoofGeo(2.35, 0.82, 0.07, 0.32);
+    const t1Roof = new THREE.Mesh(t1RoofGeo, roofMetalMat);
+    t1Roof.position.y = 0.34;
+    t1Roof.castShadow = true;
+    t1Group.add(t1Roof);
+
+    for (let i = -2; i <= 2; i++) {
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.86), darkRoofTrimMat);
+      rib.position.set(i * 0.44, 0.48 - Math.abs(i) * 0.045, 0);
+      t1Group.add(rib);
+    }
+
+    [-1, 1].forEach((side) => {
+      const wing = new THREE.Group();
+      wing.position.set(side * 1.15, 0, -0.05);
+      wing.rotation.y = side * -0.28;
+
+      const wingGlass = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.24, 0.30), glassCurtainMat);
+      wingGlass.position.set(side * 0.52, 0.12, 0);
+      wingGlass.castShadow = true;
+      wing.add(wingGlass);
+
+      const wingRoof = new THREE.Mesh(createArchedRoofGeo(1.28, 0.36, 0.05, 0.14), roofMetalMat);
+      wingRoof.position.set(side * 0.52, 0.25, 0);
+      wingRoof.castShadow = true;
+      wing.add(wingRoof);
+
+      const rotunda = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.22, 0.26, 12), glassCurtainMat);
+      rotunda.position.set(side * 1.12, 0.13, 0);
+      wing.add(rotunda);
+      const rotundaCap = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.24, 0.08, 12), roofMetalMat);
+      rotundaCap.position.set(side * 1.12, 0.28, 0);
+      wing.add(rotundaCap);
+
+      t1Group.add(wing);
+    });
+
+    // T1 Landside Transportation Center (제1교통센터 "Great Hall" Elliptical Glass Dome)
+    const t1Transit = new THREE.Group();
+    setWorldPos(t1Transit, 0.16, -1.58, 0);
+    t1Transit.rotation.y = uAngleY;
+
+    const domePodium = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.74, 0.09, 24), concreteMat);
+    domePodium.scale.set(1.25, 1, 0.78);
+    domePodium.position.y = 0.045;
+    t1Transit.add(domePodium);
+
+    const glassDome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.56, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      warmAtriumGlassMat
+    );
+    glassDome.scale.set(1.22, 0.62, 0.74);
+    glassDome.position.y = 0.08;
+    glassDome.castShadow = true;
+    t1Transit.add(glassDome);
+
+    for (let rIdx = -1; rIdx <= 1; rIdx++) {
+      const arch = new THREE.Mesh(new THREE.TorusGeometry(0.41, 0.022, 6, 20, Math.PI), roofMetalMat);
+      arch.position.set(rIdx * 0.22, 0.09, 0);
+      arch.rotation.y = Math.PI / 2;
+      arch.scale.set(1.0, 0.85, 1.0);
+      t1Transit.add(arch);
+    }
+
+    const skybridge = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 0.72), glassCurtainMat);
+    skybridge.position.set(0, 0.22, -0.58);
+    t1Transit.add(skybridge);
+
+    incheonAirportGroup.add(t1Group);
+    incheonAirportGroup.add(t1Transit);
+
+    // ------------------------------------------------------------
+    // 2. MIDFIELD CONCOURSE (탑승동) - Elongated Satellite Terminal
+    // ------------------------------------------------------------
+    const concourseGroup = new THREE.Group();
+    setWorldPos(concourseGroup, 0.16, -0.15, 0);
+    concourseGroup.rotation.y = uAngleY;
+
+    const concourseBody = new THREE.Mesh(new THREE.BoxGeometry(2.75, 0.28, 0.34), glassCurtainMat);
+    concourseBody.position.y = 0.14;
+    concourseBody.castShadow = true;
+    concourseBody.receiveShadow = true;
+    concourseGroup.add(concourseBody);
+
+    const concourseRoof = new THREE.Mesh(createArchedRoofGeo(2.90, 0.44, 0.055, 0.16), roofMetalMat);
+    concourseRoof.position.y = 0.28;
+    concourseRoof.castShadow = true;
+    concourseGroup.add(concourseRoof);
+
+    const concourseHub = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.36, 16), warmAtriumGlassMat);
+    concourseHub.position.y = 0.18;
+    concourseGroup.add(concourseHub);
+    const concourseHubCap = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.34, 0.10, 16), roofMetalMat);
+    concourseHubCap.position.y = 0.39;
+    concourseGroup.add(concourseHubCap);
+
+    incheonAirportGroup.add(concourseGroup);
+
+    // ------------------------------------------------------------
+    // 3. TERMINAL 2 (제2여객터미널) - Phoenix / H-Wing Architecture
+    // ------------------------------------------------------------
+    const t2Group = new THREE.Group();
+    setWorldPos(t2Group, 0.08, 0.98, 0);
+    t2Group.rotation.y = uAngleY;
+
+    const t2Body = new THREE.Mesh(new THREE.BoxGeometry(2.10, 0.36, 0.62), glassCurtainMat);
+    t2Body.position.y = 0.18;
+    t2Body.castShadow = true;
+    t2Body.receiveShadow = true;
+    t2Group.add(t2Body);
+
+    const t2Roof = new THREE.Mesh(createArchedRoofGeo(2.34, 0.74, 0.065, 0.28), roofMetalMat);
+    t2Roof.position.y = 0.36;
+    t2Roof.castShadow = true;
+    t2Group.add(t2Roof);
+
+    const t2Skylight = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.07, 0.14), warmAtriumGlassMat);
+    t2Skylight.position.y = 0.60;
+    t2Group.add(t2Skylight);
+
+    [
+      { sx: -1, sz: 1, ang: 0.32 },
+      { sx: 1, sz: 1, ang: -0.32 },
+      { sx: -1, sz: -1, ang: -0.24 },
+      { sx: 1, sz: -1, ang: 0.24 }
+    ].forEach(({ sx, sz, ang }) => {
+      const pier = new THREE.Group();
+      pier.position.set(sx * 0.96, 0, sz * 0.18);
+      pier.rotation.y = ang;
+      const pBody = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.24, 0.24), glassCurtainMat);
+      pBody.position.set(sx * 0.36, 0.12, 0);
+      pBody.castShadow = true;
+      pier.add(pBody);
+      const pRoof = new THREE.Mesh(createArchedRoofGeo(0.94, 0.30, 0.045, 0.11), roofMetalMat);
+      pRoof.position.set(sx * 0.36, 0.24, 0);
+      pRoof.castShadow = true;
+      pier.add(pRoof);
+      t2Group.add(pier);
+    });
+
+    const t2Transit = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.20, 0.42), warmAtriumGlassMat);
+    t2Transit.position.set(0, 0.10, -0.78);
+    t2Transit.castShadow = true;
+    t2Group.add(t2Transit);
+    const t2TransitRoof = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.05, 0.48), roofMetalMat);
+    t2TransitRoof.position.set(0, 0.22, -0.78);
+    t2Group.add(t2TransitRoof);
+
+    incheonAirportGroup.add(t2Group);
+
+    // ------------------------------------------------------------
+    // 4. ICONIC INCHEON CONTROL TOWER (인천공항 관제탑 - 100.4m)
+    // ------------------------------------------------------------
+    const towerGroup = new THREE.Group();
+    setWorldPos(towerGroup, 0.58, -0.56, 0);
+
+    const towerBase = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.24, 8), concreteMat);
+    towerBase.position.y = 0.12;
+    towerBase.castShadow = true;
+    towerGroup.add(towerBase);
+
+    const lowerShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.22, 1.30, 12), roofMetalMat);
+    lowerShaft.position.y = 0.88;
+    lowerShaft.castShadow = true;
+    towerGroup.add(lowerShaft);
+
+    const upperFlaredCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.13, 0.95, 12), roofMetalMat);
+    upperFlaredCollar.position.y = 2.00;
+    upperFlaredCollar.castShadow = true;
+    towerGroup.add(upperFlaredCollar);
+
+    const cabGlow = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.33, 0.36, 12), warmAtriumGlassMat);
+    cabGlow.position.y = 2.65;
+    cabGlow.castShadow = true;
+    towerGroup.add(cabGlow);
+
+    const cabFrame = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.06, 12), darkRoofTrimMat);
+    cabFrame.position.y = 2.46;
+    towerGroup.add(cabFrame);
+
+    const cabRoof = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.52, 0.14, 12), roofMetalMat);
+    cabRoof.position.y = 2.90;
+    cabRoof.castShadow = true;
+    towerGroup.add(cabRoof);
+
+    const radomeMast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, 0.34, 8), darkRoofTrimMat);
+    radomeMast.position.y = 3.12;
+    towerGroup.add(radomeMast);
+
+    const radome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 12, 10),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.22, metalness: 0.1 })
+    );
+    radome.position.y = 3.36;
+    radome.castShadow = true;
+    towerGroup.add(radome);
+
+    const towerBeacon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.065, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xef4444 })
+    );
+    towerBeacon.position.y = 3.56;
+    towerGroup.add(towerBeacon);
+
+    towerGroup.scale.setScalar(0.58);
+    incheonAirportGroup.add(towerGroup);
+
+    // ------------------------------------------------------------
+    // 5. PASSENGER BOARDING BRIDGES (탑승교) - Instanced
+    // ------------------------------------------------------------
+    const bridgeSpecs = [
+      ...[-0.36, -0.22, -0.08, 0.08, 0.24, 0.40, 0.56].map(u => ({ u, v: -0.82 })),
+      ...[-0.30, -0.15, 0.00, 0.16, 0.32, 0.48, 0.62].map(u => ({ u, v: -0.25 })),
+      ...[-0.30, -0.15, 0.00, 0.16, 0.32, 0.48, 0.62].map(u => ({ u, v: -0.04 })),
+      ...[-0.32, -0.16, 0.00, 0.16, 0.32, 0.48].map(u => ({ u, v: 0.72 }))
+    ];
+    const jbGeo = new THREE.BoxGeometry(0.055, 0.08, 0.28);
+    const jbInst = new THREE.InstancedMesh(jbGeo, jetbridgeMat, bridgeSpecs.length);
+    const dummy = new THREE.Object3D();
+    bridgeSpecs.forEach((b, idx) => {
+      const p = airportToWorld(b.u, b.v);
+      dummy.position.set(p.x, p.y + 0.12, p.z);
+      dummy.rotation.set(0, vAngleY, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      jbInst.setMatrixAt(idx, dummy.matrix);
+    });
+    jbInst.instanceMatrix.needsUpdate = true;
+    jbInst.castShadow = true;
+    jbInst.frustumCulled = false;
+    incheonAirportGroup.add(jbInst);
+
+    // ------------------------------------------------------------
+    // 6. CARGO HANGARS & AVIATION FUEL FARM (화물터미널 · 격납고 · 유류저장소)
+    // ------------------------------------------------------------
+    const hangarSpecs = [
+      { u: 0.90, v: -1.62, w: 0.78, d: 0.56, h: 0.26 },
+      { u: 0.90, v: -1.88, w: 0.78, d: 0.56, h: 0.26 },
+      { u: 0.96, v: 0.38, w: 0.86, d: 0.62, h: 0.30 },
+      { u: 0.96, v: 0.68, w: 0.86, d: 0.62, h: 0.30 }
+    ];
+    hangarSpecs.forEach((hg) => {
+      const hGrp = new THREE.Group();
+      setWorldPos(hGrp, hg.u, hg.v, 0);
+      hGrp.rotation.y = uAngleY;
+      const hWall = new THREE.Mesh(new THREE.BoxGeometry(hg.w, hg.h, hg.d), concreteMat);
+      hWall.position.y = hg.h * 0.5;
+      hWall.castShadow = true;
+      hGrp.add(hWall);
+      const hRoof = new THREE.Mesh(createArchedRoofGeo(hg.w * 1.06, hg.d * 1.02, 0.04, 0.14), roofMetalMat);
+      hRoof.position.y = hg.h;
+      hRoof.castShadow = true;
+      hGrp.add(hRoof);
+      const hDoor = new THREE.Mesh(new THREE.BoxGeometry(0.03, hg.h * 0.72, hg.d * 0.72), darkRoofTrimMat);
+      hDoor.position.set(-hg.w * 0.5 - 0.005, hg.h * 0.38, 0);
+      hGrp.add(hDoor);
+      incheonAirportGroup.add(hGrp);
+    });
+
+    const tankGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.14, 14);
+    const tankInst = new THREE.InstancedMesh(tankGeo, roofMetalMat, 6);
+    for (let t = 0; t < 6; t++) {
+      const tu = -0.68 + (t % 3) * 0.12;
+      const tv = -1.92 - Math.floor(t / 3) * 0.14;
+      const p = airportToWorld(tu, tv);
+      dummy.position.set(p.x, p.y + 0.07, p.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      tankInst.setMatrixAt(t, dummy.matrix);
+    }
+    tankInst.instanceMatrix.needsUpdate = true;
+    tankInst.castShadow = true;
+    tankInst.frustumCulled = false;
+    incheonAirportGroup.add(tankInst);
+
+    // ------------------------------------------------------------
+    // 7. PARKED WIDEBODY AIRCRAFT & ANIMATED DEPARTING JET
+    // ------------------------------------------------------------
+    const parkedAircraft = [
+      { u: -0.36, v: -0.66, heading: Math.PI, livery: 'korean' },
+      { u: 0.08, v: -0.66, heading: Math.PI, livery: 'asiana' },
+      { u: 0.40, v: -0.66, heading: Math.PI, livery: 'korean' },
+      { u: -0.30, v: -0.36, heading: 0, livery: 'korean' },
+      { u: 0.16, v: -0.36, heading: 0, livery: 'asiana' },
+      { u: -0.15, v: 0.10, heading: Math.PI, livery: 'korean' },
+      { u: 0.32, v: 0.10, heading: Math.PI, livery: 'korean' },
+      { u: 0.00, v: 0.58, heading: 0, livery: 'korean' },
+      { u: 0.32, v: 0.58, heading: 0, livery: 'asiana' },
+      { u: 0.72, v: -1.65, heading: -Math.PI / 2, livery: 'cargo' },
+      { u: -1.52, v: -2.02, heading: Math.PI, livery: 'korean' }
+    ];
+
+    parkedAircraft.forEach((ap) => {
+      const jet = createAircraftMesh(ap.livery);
+      jet.scale.setScalar(1.15);
+      setWorldPos(jet, ap.u, ap.v, 0.065);
+      jet.rotation.y = vAngleY + ap.heading;
+      incheonAirportGroup.add(jet);
+    });
+
+    // Animated Departing/Climbing Airliner over Runway 15R/33L
+    const worldTakeoffPts = [
+      airportToWorld(-1.52, -1.95),
+      airportToWorld(-1.52, -0.30),
+      airportToWorld(-1.52, 1.35),
+      airportToWorld(-1.60, 2.90),
+      airportToWorld(-2.40, 4.40),
+      airportToWorld(-3.60, 2.50),
+      airportToWorld(-3.40, -1.20),
+      airportToWorld(-2.30, -3.50),
+      airportToWorld(-1.52, -2.55)
+    ];
+    const curvePts = worldTakeoffPts.map((pt, idx) => {
+      const alt = idx <= 1 ? 0.09 : idx === 2 ? 0.95 : idx === 3 ? 3.2 : idx <= 6 ? 5.6 : idx === 7 ? 2.4 : 0.65;
+      return new THREE.Vector3(pt.x, pt.y + alt, pt.z);
+    });
+    airportFlightCurve = new THREE.CatmullRomCurve3(curvePts, true);
+    airportAnimPlane = createAircraftMesh('korean');
+    airportAnimPlane.scale.setScalar(1.15);
+    incheonAirportGroup.add(airportAnimPlane);
+
+    // ------------------------------------------------------------
+    // 8. INSTANCED RUNWAY EDGE, THRESHOLD & APPROACH LIGHTS
+    // ------------------------------------------------------------
+    const whiteLightPts = [];
+    const greenLightPts = [];
+
+    layout.runways.forEach((rw) => {
+      const halfW = rw.widthKm * 0.52;
+      const steps = 16;
+      for (let i = 0; i <= steps; i++) {
+        const v = rw.vStart + (i / steps) * (rw.vEnd - rw.vStart);
+        whiteLightPts.push(airportToWorld(rw.u - halfW, v));
+        whiteLightPts.push(airportToWorld(rw.u + halfW, v));
+      }
+      // Threshold green lights & Approach Lighting System (ALS) lead-in bars
+      for (let s = -2; s <= 2; s++) {
+        greenLightPts.push(airportToWorld(rw.u + s * 0.014, rw.vStart));
+        greenLightPts.push(airportToWorld(rw.u + s * 0.014, rw.vEnd));
+      }
+      for (let a = 1; a <= 3; a++) {
+        whiteLightPts.push(airportToWorld(rw.u, rw.vStart - a * 0.11));
+        whiteLightPts.push(airportToWorld(rw.u, rw.vEnd + a * 0.11));
+      }
+    });
+
+    const bulbGeo = new THREE.SphereGeometry(0.015, 6, 6);
+    const whiteBulbMat = new THREE.MeshStandardMaterial({
+      color: 0xfef3c7,
+      emissive: 0xfde68a,
+      emissiveIntensity: 0.25,
+      roughness: 0.2
+    });
+    const greenBulbMat = new THREE.MeshStandardMaterial({
+      color: 0x34d399,
+      emissive: 0x10b981,
+      emissiveIntensity: 0.35,
+      roughness: 0.2
+    });
+    airportEmissiveMaterials.push({ mat: whiteBulbMat, dayInt: 0.25, nightInt: 1.85 });
+    airportEmissiveMaterials.push({ mat: greenBulbMat, dayInt: 0.35, nightInt: 1.95 });
+
+    const whiteInst = new THREE.InstancedMesh(bulbGeo, whiteBulbMat, whiteLightPts.length);
+    whiteLightPts.forEach((pt, idx) => {
+      dummy.position.set(pt.x, pt.y + 0.016, pt.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      whiteInst.setMatrixAt(idx, dummy.matrix);
+    });
+    whiteInst.instanceMatrix.needsUpdate = true;
+    whiteInst.frustumCulled = false;
+    incheonAirportGroup.add(whiteInst);
+
+    const greenInst = new THREE.InstancedMesh(bulbGeo, greenBulbMat, greenLightPts.length);
+    greenLightPts.forEach((pt, idx) => {
+      dummy.position.set(pt.x, pt.y + 0.018, pt.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      greenInst.setMatrixAt(idx, dummy.matrix);
+    });
+    greenInst.instanceMatrix.needsUpdate = true;
+    greenInst.frustumCulled = false;
+    incheonAirportGroup.add(greenInst);
+
+    scene.add(incheonAirportGroup);
   }
 
   function buildNightSkyStars() {
@@ -2461,6 +3161,7 @@
     }
 
     const elev = solar.elevationDeg;
+    document.body.classList.toggle('is-night-sky', elev <= 0);
 
     if (elev > 0) {
       const sunRatio = Math.min(1, elev / 38);
@@ -2516,6 +3217,14 @@
 
       if (starsPoints && starsPoints.material) {
         starsPoints.material.opacity = THREE.MathUtils.lerp(0.0, 0.95, Math.min(1, (-elev - 2) / 10));
+      }
+    }
+
+    if (airportEmissiveMaterials && airportEmissiveMaterials.length > 0) {
+      const duskFactor = THREE.MathUtils.clamp((8 - elev) / 16, 0, 1);
+      for (let i = 0; i < airportEmissiveMaterials.length; i++) {
+        const entry = airportEmissiveMaterials[i];
+        entry.mat.emissiveIntensity = THREE.MathUtils.lerp(entry.dayInt, entry.nightInt, duskFactor);
       }
     }
   }
@@ -2859,10 +3568,11 @@
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 24;
+    controls.minDistance = 8;
     controls.maxDistance = 420;
     controls.maxPolarAngle = Math.PI * 0.49;
     controls.enablePan = true;
+    controls.addEventListener('start', () => { cameraFlyTarget = null; });
 
     // Warm sun key light and cool sky hemisphere fill
     ambientLight = new THREE.HemisphereLight(0xdcf0fb, 0x768780, 0.92);
@@ -2960,6 +3670,24 @@
       const delta = Math.min(0.05, (time - lastFrameTime) / 1000 || 0);
       lastFrameTime = time;
       updateDroneFlight(delta);
+      if (!droneMode && cameraFlyTarget) {
+        const alpha = 1 - Math.exp(-delta * 5.2);
+        camera.position.lerp(cameraFlyTarget.pos, alpha);
+        controls.target.lerp(cameraFlyTarget.target, alpha);
+        if (camera.position.distanceTo(cameraFlyTarget.pos) < 0.08 &&
+            controls.target.distanceTo(cameraFlyTarget.target) < 0.08) {
+          camera.position.copy(cameraFlyTarget.pos);
+          controls.target.copy(cameraFlyTarget.target);
+          cameraFlyTarget = null;
+        }
+      }
+      if (airportAnimPlane && airportFlightCurve) {
+        airportFlightPhase = (airportFlightPhase + delta * 0.042) % 1;
+        airportFlightCurve.getPointAt(airportFlightPhase, _planePos);
+        airportFlightCurve.getPointAt((airportFlightPhase + 0.006) % 1, _planeNextPos);
+        airportAnimPlane.position.copy(_planePos);
+        airportAnimPlane.lookAt(_planeNextPos);
+      }
       if (!droneMode) controls.update();
       updateLabels();
       updateWeather(delta, time);
@@ -2973,6 +3701,7 @@
   window.openShareDialog = openShareDialog;
   window.closeShareDialog = closeShareDialog;
   window.shareCurrentView = shareCurrentView;
+  window.focusOnMarker = focusOnMarker;
 
   initUI();
   initScene().catch((error) => {

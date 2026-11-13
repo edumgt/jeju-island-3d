@@ -19,6 +19,7 @@
   <script defer src="/assets/jeju-roads.js"></script>
   <script defer src="/assets/haeundae-data.js"></script>
   <script defer src="/assets/incheon-data.js"></script>
+  <script defer src="/assets/terrain-optimizer.js"></script>
   <script defer src="/jeju-planner.js"></script>
 </head>
 <body>
@@ -121,6 +122,16 @@
             <div class="range-ends"><span>낮게</span><span>높게</span></div>
             <label class="toggle-row"><span><strong>장소 이름 표시</strong><small>지도 위 장소 레이블</small></span><input id="toggle-labels" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
             <label class="toggle-row"><span><strong>바다 표시</strong><small>섬 주변의 푸른 배경</small></span><input id="toggle-ocean" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+
+            <div class="mesh-quality-group">
+              <div class="range-heading"><span>지형 메시 최적화</span></div>
+              <div class="mesh-quality-segmented" role="radiogroup" aria-label="지형 메시 최적화">
+                <label class="mesh-quality-option"><input type="radio" name="terrain-detail" value="eco"><span>경량</span></label>
+                <label class="mesh-quality-option"><input type="radio" name="terrain-detail" value="adaptive" checked><span>적응형 정밀</span></label>
+                <label class="mesh-quality-option"><input type="radio" name="terrain-detail" value="high"><span>고밀도</span></label>
+              </div>
+              <p class="mesh-quality-hint">해안선과 능선에 다각형을 집중하고 평탄한 해역은 단순화합니다.</p>
+            </div>
 
             <div class="divider"></div>
             <div class="section-heading"><div><span class="section-kicker">ATMOSPHERE</span><h2>날씨·환경 효과</h2></div></div>
@@ -333,7 +344,10 @@
           <span id="selection-kind" class="selection-kind">LANDMARK</span>
           <strong id="selection-name"></strong>
           <span id="selection-coordinates" class="selection-coordinates"></span>
-          <button id="remove-selection" class="selection-remove" type="button">지도에서 제거</button>
+          <div class="selection-actions">
+            <button id="focus-selection" class="selection-focus" type="button">🔍 가까이 보기</button>
+            <button id="remove-selection" class="selection-remove" type="button">지도에서 제거</button>
+          </div>
         </div>
 
         <div class="bottom-toolbar">

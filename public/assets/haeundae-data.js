@@ -153,40 +153,18 @@
     { id: 'market', name: '해운대 전통시장', category: '맛집·쇼핑', icon: '♨', lat: 35.1618, lng: 129.1615 }
   ];
 
-  // Procedural Asset Generator for Haeundae: realistic geological elevation & satellite textures
+  // Procedural Asset Generator for Haeundae: 2048x2048 realistic geological elevation, satellite textures, normal & roughness maps
   function createHaeundaeAssets() {
-    const W = 1024;
-    const H = 1024;
-    const HW = 256;
-    const HH = 256;
+    const W = 2048;
+    const H = 2048;
+    const HW = 512;
+    const HH = 512;
 
-    // Fast raster polygon mask (O(1) land check)
-    const maskCanvas = document.createElement('canvas');
-    maskCanvas.width = HW;
-    maskCanvas.height = HH;
-    const mCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
-    mCtx.beginPath();
-    HAEUNDAE_OUTLINE.forEach(([lng, lat], i) => {
-      const x = ((lng - BOUNDS.west) / (BOUNDS.east - BOUNDS.west)) * HW;
-      const y = ((BOUNDS.north - lat) / (BOUNDS.north - BOUNDS.south)) * HH;
-      if (i === 0) mCtx.moveTo(x, y);
-      else mCtx.lineTo(x, y);
-    });
-    mCtx.closePath();
-    mCtx.fillStyle = '#ffffff';
-    mCtx.fill();
-    const maskPixels = mCtx.getImageData(0, 0, HW, HH).data;
-
-    function isLand(px, py) {
-      const mx = Math.max(0, Math.min(HW - 1, Math.floor((px / W) * HW)));
-      const my = Math.max(0, Math.min(HH - 1, Math.floor((py / H) * HH)));
-      return maskPixels[(my * HW + mx) * 4 + 3] > 128;
-    }
-
-    // Procedural noise functions
-    function pseudoNoise(x, y) {
-      const s = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-      return s - Math.floor(s);
+    // Fast deterministic 32-bit integer hash noise
+    function pseudoNoise(ix, iy) {
+      let n = (Math.imul(ix | 0, 374761393) + Math.imul(iy | 0, 668265263)) | 0;
+      n = Math.imul(n ^ (n >>> 13), 1274126177);
+      return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
     }
     function smoothNoise(x, y) {
       const ix = Math.floor(x), iy = Math.floor(y);
@@ -203,7 +181,7 @@
       let v = 0, a = 0.5, f = 1;
       for (let i = 0; i < (oct || 3); i++) {
         v += smoothNoise(x * f, y * f) * a;
-        a *= 0.5; f *= 2;
+        a *= 0.5; f *= 2.03;
       }
       return v;
     }
@@ -226,55 +204,90 @@
       return Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy));
     }
 
-    // Realistic geological elevation model:
-    // Sculpted based on real Haeundae geography with main peak, radiating ridges, and natural valleys
-    function calculateElevation(lat, lng) {
-      let h = 3.5; // Coastal plain baseline
+    // Full-resolution 2048x2048 raster polygon mask so coastlines have crisp, stair-free curves
+    const fullMaskCanvas = document.createElement('canvas');
+    fullMaskCanvas.width = W;
+    fullMaskCanvas.height = H;
+    const fmCtx = fullMaskCanvas.getContext('2d', { willReadFrequently: true });
+    fmCtx.beginPath();
+    HAEUNDAE_OUTLINE.forEach(([lng, lat], i) => {
+      const x = ((lng - BOUNDS.west) / (BOUNDS.east - BOUNDS.west)) * W;
+      const y = ((BOUNDS.north - lat) / (BOUNDS.north - BOUNDS.south)) * H;
+      if (i === 0) fmCtx.moveTo(x, y);
+      else fmCtx.lineTo(x, y);
+    });
+    fmCtx.closePath();
+    fmCtx.fillStyle = '#ffffff';
+    fmCtx.fill();
+    const fullMaskPixels = fmCtx.getImageData(0, 0, W, H).data;
 
-      // 1. Jangsan Mountain Massif (634m peak + interconnected ridge spines)
+    // Heightmap land mask (512x512)
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = HW;
+    maskCanvas.height = HH;
+    const mCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+    mCtx.beginPath();
+    HAEUNDAE_OUTLINE.forEach(([lng, lat], i) => {
+      const x = ((lng - BOUNDS.west) / (BOUNDS.east - BOUNDS.west)) * HW;
+      const y = ((BOUNDS.north - lat) / (BOUNDS.north - BOUNDS.south)) * HH;
+      if (i === 0) mCtx.moveTo(x, y);
+      else mCtx.lineTo(x, y);
+    });
+    mCtx.closePath();
+    mCtx.fillStyle = '#ffffff';
+    mCtx.fill();
+    const maskPixels = mCtx.getImageData(0, 0, HW, HH).data;
+
+    // Realistic geological elevation model:
+    function calculateElevation(lat, lng) {
+      let h = 3.5;
+
+      // 1. Jangsan Mountain Massif (634m peak + interconnected ridge spines using smooth max-blend)
+      let jangsanH = 0;
       const dSummit = distKm(lat, lng, 35.1802, 129.1415);
-      if (dSummit < 1.45) {
-        const f = Math.max(0, 1 - dSummit / 1.45);
-        h += 628 * Math.pow(f, 2.0);
+      if (dSummit < 1.55) {
+        const f = Math.max(0, 1 - dSummit / 1.55);
+        jangsanH = Math.max(jangsanH, 628 * Math.pow(f, 1.85));
       }
 
-      // East ridge to Jungbong (403m at 35.1725, 129.1530)
+      // East ridge to Jungbong (403m)
       const dRidgeE = distToSegmentKm(lat, lng, 35.1802, 129.1415, 35.1725, 129.1530);
       const dJungbong = distKm(lat, lng, 35.1725, 129.1530);
-      if (dRidgeE < 0.75 && dJungbong < 1.8) {
-        const along = Math.max(0, 1 - dJungbong / 1.8);
-        const across = Math.max(0, 1 - dRidgeE / 0.75);
-        h += (220 + along * 180) * Math.pow(across, 2.2);
+      if (dRidgeE < 0.78 && dJungbong < 1.85) {
+        const along = Math.max(0, 1 - dJungbong / 1.85);
+        const across = Math.max(0, 1 - dRidgeE / 0.78);
+        jangsanH = Math.max(jangsanH, (235 + along * 175) * Math.pow(across, 2.0));
       }
 
-      // South ridge to Ongnyebong (383m at 35.1675, 129.1440)
+      // South ridge to Ongnyebong (383m)
       const dRidgeS = distToSegmentKm(lat, lng, 35.1802, 129.1415, 35.1675, 129.1440);
       const dOngnye = distKm(lat, lng, 35.1675, 129.1440);
-      if (dRidgeS < 0.70 && dOngnye < 1.6) {
-        const along = Math.max(0, 1 - dOngnye / 1.6);
-        const across = Math.max(0, 1 - dRidgeS / 0.70);
-        h += (200 + along * 180) * Math.pow(across, 2.2);
+      if (dRidgeS < 0.72 && dOngnye < 1.65) {
+        const along = Math.max(0, 1 - dOngnye / 1.65);
+        const across = Math.max(0, 1 - dRidgeS / 0.72);
+        jangsanH = Math.max(jangsanH, (210 + along * 175) * Math.pow(across, 2.0));
       }
 
-      // West ridge to Gukgibong (450m at 35.1770, 129.1330)
+      // West ridge to Gukgibong (450m)
       const dRidgeW = distToSegmentKm(lat, lng, 35.1802, 129.1415, 35.1770, 129.1330);
       const dGukgi = distKm(lat, lng, 35.1770, 129.1330);
-      if (dRidgeW < 0.75 && dGukgi < 1.5) {
-        const along = Math.max(0, 1 - dGukgi / 1.5);
-        const across = Math.max(0, 1 - dRidgeW / 0.75);
-        h += (240 + along * 200) * Math.pow(across, 2.2);
+      if (dRidgeW < 0.78 && dGukgi < 1.55) {
+        const along = Math.max(0, 1 - dGukgi / 1.55);
+        const across = Math.max(0, 1 - dRidgeW / 0.78);
+        jangsanH = Math.max(jangsanH, (250 + along * 195) * Math.pow(across, 2.0));
       }
 
-      // North-east ridge towards Songjeong (sloping down)
+      // North-east ridge towards Songjeong
       const dRidgeNE = distToSegmentKm(lat, lng, 35.1802, 129.1415, 35.1860, 129.1750);
       const dDistNE = distKm(lat, lng, 35.1860, 129.1750);
-      if (dRidgeNE < 0.8 && dDistNE < 2.2) {
-        const across = Math.max(0, 1 - dRidgeNE / 0.8);
-        const along = Math.max(0, 1 - dDistNE / 2.2);
-        h += 220 * along * Math.pow(across, 2.2);
+      if (dRidgeNE < 0.85 && dDistNE < 2.25) {
+        const across = Math.max(0, 1 - dRidgeNE / 0.85);
+        const along = Math.max(0, 1 - dDistNE / 2.25);
+        jangsanH = Math.max(jangsanH, 235 * along * Math.pow(across, 2.0));
       }
+      h += jangsanH;
 
-      // Deep valley cut: Daecheon stream gorge between Jungbong & Ongnyebong
+      // Deep valley cut: Daecheon stream gorge
       const dGorge = distToSegmentKm(lat, lng, 35.178, 129.145, 35.170, 129.162);
       if (dGorge < 0.55 && h > 20) {
         const cut = (1 - dGorge / 0.55) * Math.min(140, h * 0.45);
@@ -283,19 +296,19 @@
 
       // Natural mountain fractal crags
       if (h > 40) {
-        const nx = (lng - BOUNDS.west) * 160;
-        const ny = (lat - BOUNDS.south) * 160;
+        const nx = (lng - BOUNDS.west) * 165;
+        const ny = (lat - BOUNDS.south) * 165;
         h += (fbm(nx, ny, 3) - 0.5) * Math.min(48, h * 0.16);
       }
 
-      // 2. Dalmaji Hill (와우산 165m) - coastal ridge
+      // 2. Dalmaji Hill (165m)
       const dDalmaji = distKm(lat, lng, 35.1611, 129.1785);
       if (dDalmaji < 1.1) {
         const f = Math.max(0, 1 - dDalmaji / 1.1);
         h += 162 * Math.pow(f, 2.2);
       }
 
-      // 3. Dongbaekseom (46m) coastal headland
+      // 3. Dongbaekseom (46m)
       const dDongbaek = distKm(lat, lng, 35.1531, 129.1523);
       if (dDongbaek < 0.42) {
         const f = Math.max(0, 1 - dDongbaek / 0.42);
@@ -312,7 +325,7 @@
       const dCentum = distKm(lat, lng, 35.1680, 129.1320);
       if (dCentum < 0.70) h = Math.min(h, 7.5);
 
-      // Smooth perimeter taper near bounding edges (prevents cliff cuts)
+      // Smooth perimeter taper near bounding edges
       const edgeTaper = Math.min(
         1,
         Math.min(
@@ -330,7 +343,7 @@
       return Math.max(0, Math.min(634, h));
     }
 
-    // 1. Generate Height Canvas (256x256) for smooth 3D DEM mesh
+    // 1. Generate Height Canvas (512x512) for smooth high-detail 3D DEM mesh
     const heightCanvas = document.createElement('canvas');
     heightCanvas.width = HW;
     heightCanvas.height = HH;
@@ -342,13 +355,14 @@
 
     for (let py = 0; py < HH; py++) {
       const lat = BOUNDS.north - (py / (HH - 1)) * (BOUNDS.north - BOUNDS.south);
+      const rowOff = py * HW;
       for (let px = 0; px < HW; px++) {
         const lng = BOUNDS.west + (px / (HW - 1)) * (BOUNDS.east - BOUNDS.west);
-        const idx = (py * HW + px) * 4;
+        const idx = (rowOff + px) * 4;
         const inLand = maskPixels[idx + 3] > 128;
 
         const e = inLand ? calculateElevation(lat, lng) : 0;
-        elevGrid[py * HW + px] = e;
+        elevGrid[rowOff + px] = e;
 
         const val = Math.min(255, Math.floor((e / 650) * 255));
         hData[idx] = val;
@@ -359,20 +373,60 @@
     }
     hCtx.putImageData(hImg, 0, 0);
 
-    // Bilinear sampler for high-res 1024x1024 texture pass
+    // Compute fast coastal distance inside full-res 2048x2048 land mask
+    const total = W * H;
+    const coastDist = new Uint8Array(total);
+    for (let i = 0; i < total; i++) {
+      coastDist[i] = fullMaskPixels[i * 4 + 3] > 64 ? 255 : 0;
+    }
+    for (let y = 1; y < H - 1; y++) {
+      const rowOff = y * W;
+      for (let x = 1; x < W - 1; x++) {
+        const i = rowOff + x;
+        if (coastDist[i] === 0) continue;
+        const d = Math.min(
+          coastDist[i],
+          coastDist[i - 1] + 2,
+          coastDist[i - W] + 2,
+          coastDist[i - W - 1] + 3,
+          coastDist[i - W + 1] + 3
+        );
+        coastDist[i] = d > 255 ? 255 : d;
+      }
+    }
+    for (let y = H - 2; y >= 1; y--) {
+      const rowOff = y * W;
+      for (let x = W - 2; x >= 1; x--) {
+        const i = rowOff + x;
+        if (coastDist[i] === 0) continue;
+        const d = Math.min(
+          coastDist[i],
+          coastDist[i + 1] + 2,
+          coastDist[i + W] + 2,
+          coastDist[i + W - 1] + 3,
+          coastDist[i + W + 1] + 3
+        );
+        coastDist[i] = d > 255 ? 255 : d;
+      }
+    }
+
+    // Inline bilinear sampler helper
+    const hScaleX = (HW - 1) / (W - 1);
+    const hScaleY = (HH - 1) / (H - 1);
     function sampleElevation(px, py) {
-      const sx = Math.max(0, Math.min(HW - 1.001, (px / (W - 1)) * (HW - 1)));
-      const sy = Math.max(0, Math.min(HH - 1.001, (py / (H - 1)) * (HH - 1)));
-      const x0 = Math.floor(sx), y0 = Math.floor(sy);
+      const sx = px < 0 ? 0 : (px >= W - 1 ? HW - 1.001 : px * hScaleX);
+      const sy = py < 0 ? 0 : (py >= H - 1 ? HH - 1.001 : py * hScaleY);
+      const x0 = sx | 0, y0 = sy | 0;
       const dx = sx - x0, dy = sy - y0;
-      const h00 = elevGrid[y0 * HW + x0];
-      const h10 = elevGrid[y0 * HW + x0 + 1];
-      const h01 = elevGrid[(y0 + 1) * HW + x0];
-      const h11 = elevGrid[(y0 + 1) * HW + x0 + 1];
+      const r0 = y0 * HW, r1 = r0 + HW;
+      const h00 = elevGrid[r0 + x0];
+      const h10 = elevGrid[r0 + x0 + 1];
+      const h01 = elevGrid[r1 + x0];
+      const h11 = elevGrid[r1 + x0 + 1];
       return (h00 * (1 - dx) + h10 * dx) * (1 - dy) + (h01 * (1 - dx) + h11 * dx) * dy;
     }
 
-    // 2. Generate Photorealistic Natural, Elevation, and Normal Map Textures (1024x1024)
+    // 2. Generate Photorealistic Natural, Elevation, Normal, and Roughness Textures (2048x2048)
     const naturalCanvas = document.createElement('canvas');
     naturalCanvas.width = W;
     naturalCanvas.height = H;
@@ -394,33 +448,48 @@
     const nmImg = nmCtx.createImageData(W, H);
     const nmData = nmImg.data;
 
-    // Analytical sun lighting: Azimuth 315° (NW), Altitude 45°
+    const roughnessCanvas = document.createElement('canvas');
+    roughnessCanvas.width = W;
+    roughnessCanvas.height = H;
+    const rgCtx = roughnessCanvas.getContext('2d');
+    const rgImg = rgCtx.createImageData(W, H);
+    const rgData = rgImg.data;
+
     const lx = 0.577, ly = -0.577, lz = 0.577;
 
     for (let py = 0; py < H; py++) {
       const lat = BOUNDS.north - (py / (H - 1)) * (BOUNDS.north - BOUNDS.south);
+      const rowOff = py * W;
       for (let px = 0; px < W; px++) {
         const lng = BOUNDS.west + (px / (W - 1)) * (BOUNDS.east - BOUNDS.west);
-        const idx = (py * W + px) * 4;
+        const pIdx = rowOff + px;
+        const idx = pIdx * 4;
 
-        if (!isLand(px, py)) {
-          // Transparent outside boundary for clean Three.js cut
+        const maskAlpha = fullMaskPixels[idx + 3];
+        if (maskAlpha <= 64) {
           nData[idx + 3] = 0;
           eData[idx + 3] = 0;
           nmData[idx + 3] = 0;
+          rgData[idx] = 60;
+          rgData[idx + 1] = 60;
+          rgData[idx + 2] = 60;
+          rgData[idx + 3] = 255;
           continue;
         }
 
         const elev = sampleElevation(px, py);
+        const cDist = coastDist[pIdx];
 
-        // Finite difference gradients for micro-slope and 3D normal vector
-        const xPrev = px > 2 ? sampleElevation(px - 2, py) : elev;
-        const xNext = px < W - 3 ? sampleElevation(px + 2, py) : elev;
-        const yPrev = py > 2 ? sampleElevation(px, py - 2) : elev;
-        const yNext = py < H - 3 ? sampleElevation(px, py + 2) : elev;
+        const xPrev = sampleElevation(px - 4, py);
+        const xNext = sampleElevation(px + 4, py);
+        const yPrev = sampleElevation(px, py - 4);
+        const yNext = sampleElevation(px, py + 4);
 
-        const dzdx = (xNext - xPrev) * 0.052;
-        const dzdy = (yNext - yPrev) * 0.052;
+        const microBumpX = (pseudoNoise(px + 1, py) - pseudoNoise(px - 1, py)) * 0.04;
+        const microBumpY = (pseudoNoise(px, py + 1) - pseudoNoise(px, py - 1)) * 0.04;
+
+        const dzdx = (xNext - xPrev) * 0.052 + microBumpX;
+        const dzdy = (yNext - yPrev) * 0.052 + microBumpY;
 
         const nx = -dzdx;
         const ny = -dzdy;
@@ -436,15 +505,14 @@
         nmData[idx + 3] = 255;
 
         const dot = nnx * lx + nny * ly + nnz * lz;
-        const slope = Math.hypot(dzdx, dzdy);
+        const slope = Math.hypot((xNext - xPrev) * 0.052, (yNext - yPrev) * 0.052);
         const shade = Math.min(1.36, Math.max(0.40, 0.55 + 0.58 * dot));
 
-        // Procedural multi-scale organic noise
-        const microNoise = fbm(px * 0.12, py * 0.12, 3);
-        const medNoise = fbm(px * 0.035, py * 0.035, 2);
-        const macroNoise = fbm(px * 0.012, py * 0.012, 2);
+        const microNoise = fbm(px * 0.06, py * 0.06, 3);
+        const medNoise = fbm(px * 0.018, py * 0.018, 2);
+        const macroNoise = fbm(px * 0.006, py * 0.006, 2);
+        const grain = pseudoNoise(px, py);
 
-        // Geolocation distances to real Haeundae landmarks
         const dBeach = distKm(lat, lng, 35.1587, 129.1604);
         const dDongbaek = distKm(lat, lng, 35.1531, 129.1523);
         const dDalmaji = distKm(lat, lng, 35.1611, 129.1785);
@@ -454,222 +522,227 @@
         const dLCT = distKm(lat, lng, 35.1600, 129.1690);
         const dJwaDong = distKm(lat, lng, 35.1700, 129.1700);
         const dJangsan = distKm(lat, lng, 35.1802, 129.1415);
-        const dDaecheonLake = distKm(lat, lng, 35.1715, 129.1620); // Daecheon Lake park
+        const dDaecheonLake = distKm(lat, lng, 35.1715, 129.1620);
         const dGunamro = distToSegmentKm(lat, lng, 35.1635, 129.1585, 35.1588, 129.1604);
 
-        // Suyeong River waterway corridor (along the west boundary)
         const isSuyeongRiver = (lng < 129.1355 && lat < 35.1720 && lat > 35.1520 && elev < 9);
 
-        // --- NATURAL REALISTIC SATELLITE COLOR ---
         let r, g, b;
+        let roughVal = 212;
 
-        // 1. Suyeong River (수영강 하구 & 강변 수변구역)
+        // 1. Suyeong River
         if (isSuyeongRiver && lng < 129.1345) {
-          // Deep blue river water with subtle flow ripples
-          const wave = Math.sin(py * 0.25 + px * 0.12) * 5;
+          const wave = Math.sin(py * 0.13 + px * 0.06) * 5 + grain * 4;
           r = Math.floor(24 + wave);
-          g = Math.floor(58 + wave * 1.2);
-          b = Math.floor(88 + wave);
+          g = Math.floor(62 + wave * 1.2);
+          b = Math.floor(94 + wave);
+          roughVal = 52;
         }
-        // 2. Daecheon Lake & Stream (대천공원 호수 & 대천천 수변)
+        // 2. Daecheon Lake
         else if (dDaecheonLake < 0.22 && elev < 36) {
-          // Tranquil mountain lake water
           r = Math.floor(28 + microNoise * 8);
-          g = Math.floor(66 + microNoise * 12);
-          b = Math.floor(92 + microNoise * 14);
+          g = Math.floor(68 + microNoise * 12);
+          b = Math.floor(96 + microNoise * 14);
+          roughVal = 58;
         }
-        // 3. Haeundae Beach Golden Sand Crescent & Surf Edge (해운대 해수욕장 1.5km 백사장)
-        else if (dBeach < 0.40 && elev < 14) {
-          const sandDist = dBeach / 0.40;
-          if (sandDist < 0.16) {
-            // Turquoise coastal surf foam (에메랄드빛 바닷물 & 하얀 파도 포말)
-            r = Math.floor(196 + microNoise * 18);
-            g = Math.floor(232 + microNoise * 14);
-            b = Math.floor(230 + microNoise * 14);
-          } else if (sandDist < 0.30) {
-            // Wet tide edge sand (밀물에 젖은 모래)
-            r = Math.floor(214 + microNoise * 10);
-            g = Math.floor(196 + microNoise * 10);
-            b = 158;
-          } else if (sandDist < 0.72) {
-            // Fine golden beach sand (천연 규사 황금빛 모래사장)
-            r = Math.floor(244 + microNoise * 10);
-            g = Math.floor(226 + microNoise * 10);
-            b = Math.floor(184 + microNoise * 8);
+        // 3. Haeundae Beach Golden Sand Crescent & Surf Edge
+        else if (dBeach < 0.42 && elev < 14) {
+          if (cDist <= 4) {
+            // Crisp breaking seafoam & shallow emerald swash
+            const foamMix = Math.max(0, 1 - cDist / 5) * (0.65 + microNoise * 0.35);
+            r = Math.floor(216 + foamMix * 32);
+            g = Math.floor(228 + foamMix * 22);
+            b = Math.floor(220 + foamMix * 30);
+            roughVal = 78;
+          } else if (cDist <= 14) {
+            // Wet tidal sand
+            r = Math.floor(210 + microNoise * 10 + grain * 5);
+            g = Math.floor(192 + microNoise * 10 + grain * 5);
+            b = 154;
+            roughVal = 112;
+          } else if (dBeach < 0.30) {
+            // Fine golden dry beach sand
+            r = Math.floor(242 + microNoise * 10 + grain * 6);
+            g = Math.floor(224 + microNoise * 10 + grain * 6);
+            b = Math.floor(182 + microNoise * 8);
+            roughVal = 198;
           } else {
-            // Coastal pine tree promenade buffer behind beach (해송 숲길 산책로)
-            r = Math.floor(40 + microNoise * 16);
-            g = Math.floor(76 + microNoise * 18);
-            b = Math.floor(44 + microNoise * 12);
+            // Coastal pine promenade buffer
+            r = Math.floor(38 + microNoise * 16 + grain * 5);
+            g = Math.floor(76 + microNoise * 18 + grain * 6);
+            b = Math.floor(42 + microNoise * 12);
+            roughVal = 228;
           }
         }
-        // 4. Dongbaekseom Island Peninsula (동백섬 천연기념물 동백림 & 누리마루)
+        // 4. Dongbaekseom Island Peninsula
         else if (dDongbaek < 0.48) {
-          if (elev < 8) {
-            // Coastal rocky basalt cliffs (해안 갯바위)
-            r = Math.floor(70 + microNoise * 18);
-            g = Math.floor(72 + microNoise * 18);
+          if (elev < 10 || cDist <= 10) {
+            r = Math.floor(68 + microNoise * 18 + grain * 8);
+            g = Math.floor(72 + microNoise * 18 + grain * 8);
             b = 68;
+            roughVal = cDist <= 4 ? 95 : 204;
           } else if (distKm(lat, lng, 35.1525, 129.1518) < 0.08) {
-            // Nurimaru APEC House circular copper dome rooftop
             r = Math.floor(215 + microNoise * 15);
             g = Math.floor(210 + microNoise * 15);
             b = Math.floor(195 + microNoise * 15);
+            roughVal = 128;
           } else {
-            // Dense coastal camellia & black pine canopy (동백나무·해송 숲)
-            r = Math.floor(28 + microNoise * 14);
-            g = Math.floor(74 + microNoise * 18);
+            r = Math.floor(28 + microNoise * 14 + grain * 6);
+            g = Math.floor(76 + microNoise * 18 + grain * 6);
             b = Math.floor(38 + microNoise * 12);
+            roughVal = 230;
           }
         }
-        // 5. Cheongsapo Harbor & Breakwaters (청사포 빨강·하양 등대 포구)
+        // 5. Cheongsapo Harbor & Breakwaters
         else if (dCheongsapo < 0.35 && elev < 18) {
-          // Granite pier and harbor breakwater
-          r = Math.floor(128 + microNoise * 24);
-          g = Math.floor(132 + microNoise * 22);
+          r = Math.floor(128 + microNoise * 24 + grain * 8);
+          g = Math.floor(132 + microNoise * 22 + grain * 8);
           b = Math.floor(136 + microNoise * 20);
+          roughVal = 185;
         }
-        // 6. Dalmaji Hill (와우산 달맞이길 벚꽃 가로수 & 해안 숲)
+        // 6. Dalmaji Hill coastal ridge & cliffs
         else if (dDalmaji < 0.85 && elev > 18) {
-          if (slope > 0.38) {
-            // Coastal rocky cliffs
-            r = Math.floor(95 + microNoise * 22);
-            g = Math.floor(96 + microNoise * 22);
+          if (slope > 0.38 || cDist <= 12) {
+            r = Math.floor(94 + microNoise * 22 + grain * 8);
+            g = Math.floor(96 + microNoise * 22 + grain * 8);
             b = 88;
+            roughVal = 208;
           } else {
-            // Coastal cherry & pine woods with cafes/villas
-            const cherryMix = Math.sin(px * 0.15 + py * 0.15) > 0.4 ? 16 : 0;
-            r = Math.floor(52 + cherryMix + microNoise * 18);
-            g = Math.floor(92 + microNoise * 22);
+            const cherryMix = Math.sin(px * 0.075 + py * 0.075) > 0.4 ? 16 : 0;
+            r = Math.floor(52 + cherryMix + microNoise * 18 + grain * 5);
+            g = Math.floor(92 + microNoise * 22 + grain * 5);
             b = Math.floor(54 + microNoise * 14);
+            roughVal = 226;
           }
         }
-        // 7. Gunam-ro pedestrian culture street (구남로 화강석 보도블록)
+        // 7. Gunam-ro culture street
         else if (dGunamro < 0.045 && elev < 20) {
-          r = Math.floor(205 + microNoise * 12);
-          g = Math.floor(198 + microNoise * 12);
+          r = Math.floor(205 + microNoise * 12 + grain * 6);
+          g = Math.floor(198 + microNoise * 12 + grain * 6);
           b = Math.floor(188 + microNoise * 12);
+          roughVal = 175;
         }
-        // 8. Jangsan Mountain Massif (장산 화강암 너덜겅, 억새밭, 울창한 수림)
+        // 8. Jangsan Mountain Massif
         else if (elev > 130) {
           const ratio = (elev - 130) / 504;
-          // Summit crag (장산 정상 634m 화강암 봉우리)
           if (dJangsan < 0.26) {
-            r = Math.floor(142 + microNoise * 26);
-            g = Math.floor(138 + microNoise * 24);
+            r = Math.floor(142 + microNoise * 26 + grain * 8);
+            g = Math.floor(138 + microNoise * 24 + grain * 8);
             b = Math.floor(130 + microNoise * 20);
-          }
-          // Talus scree slopes (장산 너덜겅 돌강 - Pleistocene periglacial rock field)
-          // Located along the steep ravines and rocky slopes of Jangsan
-          else if (slope > 0.30 && (microNoise > 0.42 || ratio > 0.60)) {
-            // Exposed light granite rock & scree boulders
-            r = Math.floor(148 + microNoise * 22);
-            g = Math.floor(144 + microNoise * 20);
+            roughVal = 212;
+          } else if (slope > 0.30 && (microNoise > 0.42 || ratio > 0.60)) {
+            r = Math.floor(148 + microNoise * 22 + grain * 8);
+            g = Math.floor(144 + microNoise * 20 + grain * 8);
             b = Math.floor(138 + microNoise * 18);
-          }
-          // Silver grass (장산 억새군락지) plateau on the high ridge saddle
-          else if (ratio > 0.55 && macroNoise > 0.45) {
-            const windStripe = Math.sin(px * 0.35 + py * 0.18) * 8;
-            r = Math.floor(182 + windStripe + microNoise * 16);
-            g = Math.floor(170 + windStripe * 0.9 + microNoise * 14);
+            roughVal = 215;
+          } else if (ratio > 0.55 && macroNoise > 0.45) {
+            const windStripe = Math.sin(px * 0.175 + py * 0.09) * 8;
+            r = Math.floor(182 + windStripe + microNoise * 16 + grain * 5);
+            g = Math.floor(170 + windStripe * 0.9 + microNoise * 14 + grain * 5);
             b = Math.floor(134 + windStripe * 0.7 + microNoise * 12);
-          }
-          // Deep mountain pine, oak, and mixed temperate forest (참나무·소나무 혼효림)
-          else {
+            roughVal = 224;
+          } else {
             const sub = ratio;
-            r = Math.floor(36 + sub * 18 + microNoise * 14);
-            g = Math.floor(78 + sub * 16 + microNoise * 18);
+            r = Math.floor(36 + sub * 18 + microNoise * 14 + grain * 5);
+            g = Math.floor(78 + sub * 16 + microNoise * 18 + grain * 5);
             b = Math.floor(40 + sub * 16 + microNoise * 12);
+            roughVal = 232;
           }
         }
-        // 9. Marine City, Centum City & LCT Urban Skylines (마린시티, 센텀시티, 엘시티)
+        // 9. Marine City, Centum City & LCT Urban Skylines
         else if (dMarineCity < 0.65 || dCentum < 0.85 || dLCT < 0.40) {
-          // Structured urban grid
-          const blockX = Math.floor(px * 0.18);
-          const blockY = Math.floor(py * 0.18);
+          const blockX = Math.floor(px * 0.09);
+          const blockY = Math.floor(py * 0.09);
           const blockHash = pseudoNoise(blockX, blockY);
-
-          // Sub-building pattern
-          const subX = (px * 0.18) - blockX;
-          const subY = (py * 0.18) - blockY;
+          const subX = (px * 0.09) - blockX;
+          const subY = (py * 0.09) - blockY;
           const isRoad = (subX < 0.18 || subY < 0.18);
 
           if (isRoad) {
-            // Wide coastal avenues (해안대로 & 광장)
-            r = Math.floor(66 + microNoise * 8);
-            g = Math.floor(68 + microNoise * 8);
+            r = Math.floor(66 + microNoise * 8 + grain * 4);
+            g = Math.floor(68 + microNoise * 8 + grain * 4);
             b = Math.floor(72 + microNoise * 8);
+            roughVal = 148;
           } else if (blockHash < 0.42) {
-            // Reflective glass towers (마천루 커튼월 유리 반사)
-            r = Math.floor(152 + microNoise * 16);
-            g = Math.floor(182 + microNoise * 18);
+            r = Math.floor(152 + microNoise * 16 + grain * 4);
+            g = Math.floor(182 + microNoise * 18 + grain * 4);
             b = Math.floor(218 + microNoise * 20);
+            roughVal = 96; // Reflective architectural curtain-wall towers
           } else {
-            // Modern architectural concrete plazas & BEXCO exhibition halls
-            r = Math.floor(188 + microNoise * 12);
-            g = Math.floor(190 + microNoise * 12);
+            r = Math.floor(188 + microNoise * 12 + grain * 5);
+            g = Math.floor(190 + microNoise * 12 + grain * 5);
             b = Math.floor(194 + microNoise * 12);
+            roughVal = 178;
           }
         }
-        // 10. Haeundae New Town / Jwa-dong City Blocks (좌동 신시가지 아파트 단지)
-        else if (dJwaDong < 1.35 && elev < 95) {
-          // Structured Korean superblock grid (아파트 단지)
-          const superX = Math.floor(px * 0.08);
-          const superY = Math.floor(py * 0.08);
+        // 10. Haeundae New Town / Jwa-dong City Blocks (organic contour-following urban footprint)
+        else if (dJwaDong + (macroNoise - 0.5) * 0.55 < 1.18 && elev < 82) {
+          const superX = Math.floor(px * 0.042);
+          const superY = Math.floor(py * 0.042);
           const superHash = pseudoNoise(superX, superY);
-
-          const localX = (px * 0.08) - superX;
-          const localY = (py * 0.08) - superY;
-          const isMainAvenue = (localX < 0.12 || localY < 0.12);
-
-          // Internal building bars (linear apartment buildings)
-          const bldgRow = Math.floor(localY * 7);
+          const localX = (px * 0.042) - superX;
+          const localY = (py * 0.042) - superY;
+          const isMainAvenue = (localX < 0.11 || localY < 0.11);
+          const bldgRow = Math.floor(localY * 6);
           const bldgCol = Math.floor(localX * 5);
-          const inBldg = (localY * 7 - bldgRow < 0.55 && localX * 5 - bldgCol < 0.85);
+          const inBldg = (localY * 6 - bldgRow < 0.56 && localX * 5 - bldgCol < 0.84);
 
           if (isMainAvenue) {
-            // Major asphalt boulevards (좌동순환로 & 해운대로)
-            r = Math.floor(70 + microNoise * 8);
-            g = Math.floor(72 + microNoise * 8);
-            b = Math.floor(76 + microNoise * 8);
+            r = Math.floor(74 + microNoise * 10 + grain * 4);
+            g = Math.floor(78 + microNoise * 10 + grain * 4);
+            b = Math.floor(82 + microNoise * 10);
+            roughVal = 152;
           } else if (inBldg) {
-            // Apartment complex rooftops (단지별 슬레이트 블루, 라이트 그레이, 민트 옥상)
-            if (superHash < 0.35) {
-              // Soft slate-blue roof
-              r = Math.floor(142 + microNoise * 14);
-              g = Math.floor(168 + microNoise * 16);
-              b = Math.floor(194 + microNoise * 18);
-            } else if (superHash < 0.70) {
-              // Light concrete roof
-              r = Math.floor(186 + microNoise * 12);
-              g = Math.floor(188 + microNoise * 12);
-              b = Math.floor(192 + microNoise * 12);
+            if (superHash < 0.32) {
+              r = Math.floor(136 + microNoise * 14);
+              g = Math.floor(160 + microNoise * 16);
+              b = Math.floor(184 + microNoise * 16);
+            } else if (superHash < 0.68) {
+              r = Math.floor(172 + microNoise * 14);
+              g = Math.floor(176 + microNoise * 14);
+              b = Math.floor(180 + microNoise * 14);
             } else {
-              // Pale sage-mint roof
-              r = Math.floor(156 + microNoise * 12);
-              g = Math.floor(178 + microNoise * 14);
-              b = Math.floor(164 + microNoise * 12);
+              r = Math.floor(144 + microNoise * 14);
+              g = Math.floor(164 + microNoise * 14);
+              b = Math.floor(152 + microNoise * 14);
             }
+            roughVal = 176;
           } else {
-            // Landscaped garden courtyards & tree-lined walkways between apartments
-            r = Math.floor(58 + microNoise * 14);
-            g = Math.floor(98 + microNoise * 16);
-            b = Math.floor(52 + microNoise * 12);
+            r = Math.floor(54 + microNoise * 16 + grain * 5);
+            g = Math.floor(94 + microNoise * 18 + grain * 5);
+            b = Math.floor(50 + microNoise * 12);
+            roughVal = 226;
           }
         }
-        // 11. Foothills, Parks & Riverbank Green Belts (수영강변 APEC나루공원, 올림픽공원 등)
+        // 11. Foothills, Pine Woodlands & Riverbank Green Belts (multi-octave forest canopy)
         else {
-          // Lush coastal green foothills with multi-frequency canopy variation
-          r = Math.floor(54 + medNoise * 18 + microNoise * 14);
-          g = Math.floor(98 + medNoise * 20 + microNoise * 16);
-          b = Math.floor(48 + medNoise * 14 + microNoise * 12);
+          const canopyCluster = medNoise * 0.55 + microNoise * 0.45;
+          r = Math.floor(40 + canopyCluster * 34 + grain * 6);
+          g = Math.floor(78 + canopyCluster * 42 + grain * 7);
+          b = Math.floor(40 + canopyCluster * 24 + grain * 4);
+          roughVal = 230;
         }
 
-        // Apply analytical hillshade modulation
+        // Crisp rocky seawall / coastal surf line on rocky headlands outside beach
+        if (cDist <= 4 && !(dBeach < 0.42 && elev < 14)) {
+          const foam = fbm(px * 0.14, py * 0.14, 2);
+          if (cDist <= 2 && foam > 0.42) {
+            r = Math.floor(r * 0.35 + 236 * 0.65);
+            g = Math.floor(g * 0.35 + 246 * 0.65);
+            b = Math.floor(b * 0.35 + 250 * 0.65);
+            roughVal = 88;
+          }
+        }
+
         nData[idx] = Math.min(255, Math.floor(r * shade));
         nData[idx + 1] = Math.min(255, Math.floor(g * shade));
         nData[idx + 2] = Math.min(255, Math.floor(b * shade));
         nData[idx + 3] = 255;
+
+        rgData[idx] = roughVal;
+        rgData[idx + 1] = roughVal;
+        rgData[idx + 2] = roughVal;
+        rgData[idx + 3] = 255;
 
         // --- ELEVATION RELIEF COLOR ---
         const ratio = Math.min(1, elev / 634);
@@ -696,9 +769,9 @@
           eb = Math.floor(80 + sub * 70);
         }
 
-        // Subtle contour lines every 50m
-        const contourLine = Math.abs(Math.sin(elev * 0.0628));
-        const contourFactor = contourLine < 0.12 ? 0.88 : 1.0;
+        const contourLine = Math.abs(Math.sin(elev * 0.06283));
+        const contourMinor = elev < 180 ? Math.abs(Math.sin(elev * 0.31416)) : 1.0;
+        const contourFactor = contourLine < 0.08 ? 0.84 : (contourMinor < 0.06 ? 0.94 : 1.0);
 
         eData[idx] = Math.min(255, Math.floor(er * shade * contourFactor));
         eData[idx + 1] = Math.min(255, Math.floor(eg * shade * contourFactor));
@@ -710,12 +783,14 @@
     nCtx.putImageData(nImg, 0, 0);
     eCtx.putImageData(eImg, 0, 0);
     nmCtx.putImageData(nmImg, 0, 0);
+    rgCtx.putImageData(rgImg, 0, 0);
 
     return {
       heightCanvas,
       naturalCanvas,
       elevationCanvas,
-      normalCanvas
+      normalCanvas,
+      roughnessCanvas
     };
   }
 
