@@ -20,12 +20,23 @@
   <script defer src="/assets/haeundae-data.js"></script>
   <script defer src="/assets/incheon-data.js"></script>
   <script defer src="/assets/gangneung-data.js"></script>
+  <script defer src="/assets/yeongam-data.js"></script>
   <script defer src="/assets/climate-data.js"></script>
   <script defer src="/assets/terrain-optimizer.js"></script>
+  <script defer src="/assets/place-search-helpers.js"></script>
+  <script defer src="/assets/transect-helpers.js"></script>
   <script defer src="/jeju-planner.js"></script>
 </head>
 <body>
   <div class="app-shell">
+    <div id="gmp-quota-banner" class="gmp-quota-banner" role="alert" hidden>
+      <span>
+        Google Maps Platform quota reached. If you are the app owner, visit
+        <a href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors" target="_blank" rel="noopener noreferrer">maps developer site</a>
+        for instructions to update your account.
+      </span>
+      <button type="button" id="gmp-quota-dismiss" class="gmp-quota-dismiss" aria-label="알림 닫기">×</button>
+    </div>
     <header class="topbar">
       <div class="brand">
         <button id="lnb-toggle" class="icon-button lnb-toggle" type="button" aria-label="좌측 메뉴 열기" aria-controls="sidebar" aria-expanded="false" title="메뉴 열기/닫기 (LNB)">
@@ -70,6 +81,10 @@
           <button type="button" class="rail-dest-btn" data-region="gangneung" title="강릉·경포 (경포대·바다·설악산)">
             <span class="rail-icon">🏔️</span>
             <small>강릉</small>
+          </button>
+          <button type="button" class="rail-dest-btn" data-region="yeongam" title="전남 영암 (F1 스포츠카 서킷·영암호)">
+            <span class="rail-icon">🏎️</span>
+            <small>영암</small>
           </button>
         </div>
 
@@ -150,6 +165,13 @@
                 <small>경포대·바다·설악산</small>
               </div>
             </button>
+            <button type="button" class="dest-tab" id="tab-dest-yeongam" data-region="yeongam" role="tab" aria-selected="false" title="전남 영암 코리아 인터내셔널 서킷 3D 플래너">
+              <span class="dest-tab-icon">🏎️</span>
+              <div class="dest-tab-text">
+                <strong>전남 영암</strong>
+                <small>KIC 스포츠카 서킷·영암호·월출산</small>
+              </div>
+            </button>
           </div>
         </div>
 
@@ -167,8 +189,26 @@
 
         <div class="sidebar-scroll">
           <section id="panel-places" class="panel" role="tabpanel" aria-labelledby="tab-places">
-            <div class="section-heading"><div><span id="sidebar-kicker" class="section-kicker">EXPLORE JEJU</span><h2>추천 장소</h2></div><span id="preset-count" class="count-pill">0곳</span></div>
-            <label class="search-field"><span aria-hidden="true">⌕</span><input id="place-search" type="search" placeholder="장소 검색" autocomplete="off" aria-label="추천 장소 검색"></label>
+            <div class="section-heading"><div><span id="sidebar-kicker" class="section-kicker">EXPLORE JEJU</span><h2>장소 검색 · 추천</h2></div><span id="preset-count" class="count-pill">0곳</span></div>
+            <div class="search-field-wrap">
+              <label class="search-field">
+                <span aria-hidden="true">⌕</span>
+                <input id="place-search" type="text" placeholder="장소·주소·좌표 검색 (예: 한라산, 33.458, 126.942)" autocomplete="off" aria-label="장소, 주소 또는 위경도 좌표 검색">
+                <button id="place-search-clear" class="search-clear-btn" type="button" aria-label="검색어 지우기" hidden>×</button>
+              </label>
+              <div class="search-quick-bar">
+                <button id="reverse-center-btn" class="reverse-center-btn" type="button" title="현재 3D 시점 중심 좌표로 주변 주소·지명 찾기">⌖ 현재 시점 좌표 역지오코딩</button>
+              </div>
+            </div>
+
+            <div id="search-suggestions-block" class="search-suggestions-block" hidden aria-live="polite">
+              <div class="suggestions-header">
+                <span id="geocode-mode-label" class="suggestions-kicker">MAP SUGGESTIONS</span>
+                <span id="geocode-status" class="suggestions-status"></span>
+              </div>
+              <div id="geocode-suggestion-list" class="geocode-suggestion-list"></div>
+            </div>
+
             <div id="preset-list" class="preset-list"></div>
 
             <div class="section-heading added-heading"><div><span class="section-kicker">MY MAP</span><h2>지도에 표시한 장소</h2></div><span id="marker-count" class="count-pill">0곳</span></div>
@@ -179,6 +219,7 @@
               <form id="custom-marker-form" class="custom-form">
                 <label>장소 이름<input id="custom-name" name="name" type="text" maxlength="30" placeholder="예: 나만의 장소" required></label>
                 <button id="pick-location" class="pick-location-button" type="button">⌖ &nbsp;지도에서 위치 고르기</button>
+                <div id="reverse-pick-status" class="reverse-pick-status" hidden></div>
                 <div class="form-row">
                   <label>위도<input id="custom-lat" name="lat" type="number" step="any" min="33.15" max="33.60" placeholder="33.3617" required></label>
                   <label>경도<input id="custom-lng" name="lng" type="number" step="any" min="126.12" max="127.00" placeholder="126.5292" required></label>
@@ -364,6 +405,12 @@
         <div class="viewer-title"><span class="viewer-kicker">INTERACTIVE 3D MAP <span class="live-dot"></span> LIVE</span><strong id="viewer-region-name">Jeju Island</strong><span id="viewer-region-coord">대한민국 · 북위 33.38°</span></div>
         <div class="viewer-tip">마우스로 돌리고 확대해 보세요 <span aria-hidden="true">↗</span></div>
         <div id="pick-instruction" class="pick-instruction" hidden><span id="pick-instruction-text">섬 또는 육지 위의 원하는 위치를 클릭하세요.</span> <button id="cancel-pick" type="button">취소</button></div>
+        <div id="transect-instruction" class="pick-instruction transect-instruction" hidden><span id="transect-instruction-text">3D 지형 위를 드래그해 단면 경로를 그리세요 · 실시간 측정</span> <button id="cancel-transect-draw" type="button">완료</button></div>
+        <div id="transect-live-badge" class="transect-live-badge" hidden aria-live="polite">
+          <span class="transect-live-kicker" id="transect-live-label">LIVE PROFILE</span>
+          <strong id="transect-live-elev">0m</strong>
+          <span id="transect-live-meta">거리 0.0km · 경사 0.0%</span>
+        </div>
 
         <div class="view-tools" aria-label="지도 보기 도구">
           <button type="button" data-action="perspective" class="tool-button is-active" aria-label="3D 보기" title="3D 보기"><span class="tool-icon">◇</span><small>3D</small></button>
@@ -383,15 +430,19 @@
         <div id="elevation-profile-panel" class="elevation-profile-panel" hidden>
           <div class="elev-panel-header">
             <div class="elev-title-wrap">
-              <span class="elev-kicker">D3.js TOPOGRAPHIC ELEVATION PROFILE</span>
+              <span class="elev-kicker">INTERACTIVE 3D TERRAIN CROSS-SECTION · D3.js</span>
               <strong id="elev-chart-title">지형 고도 프로필 단면도</strong>
             </div>
             <div class="elev-panel-modes" role="tablist" aria-label="단면 기준 선택">
-              <button type="button" class="elev-mode-btn is-active" data-transect="west-east" title="서-동 횡단면">서 ↔ 동 단면</button>
-              <button type="button" class="elev-mode-btn" data-transect="north-south" title="북-남 종단면">북 ↔ 남 단면</button>
-              <button type="button" class="elev-mode-btn" data-transect="places-route" title="내 장소 연결 경로 단면">장소 연결 경로</button>
+              <button type="button" class="elev-mode-btn is-active" data-transect="west-east" title="서-동 횡단면">서 ↔ 동</button>
+              <button type="button" class="elev-mode-btn" data-transect="north-south" title="북-남 종단면">북 ↔ 남</button>
+              <button type="button" class="elev-mode-btn" data-transect="places-route" title="내 장소 연결 경로 단면">장소 경로</button>
+              <button type="button" class="elev-mode-btn" data-transect="custom-path" title="3D 지도 위에서 드래그로 그린 경로">직접 경로</button>
             </div>
             <div class="elev-panel-actions">
+              <button type="button" id="elev-slice-btn" class="elev-slice-btn" aria-pressed="false" title="선택한 경로 아래 지형 단면을 WebGL + D3.js 입체 컷 뷰로 보기">🪨 Vertical Slice</button>
+              <button type="button" id="elev-draw-btn" class="elev-draw-btn" aria-pressed="false" title="3D 지도 위를 드래그하여 고도 단면 경로 그리기">✏️ 3D 경로 드래그</button>
+              <button type="button" id="elev-clear-path-btn" class="elev-clear-btn" hidden title="직접 그린 경로 초기화">초기화</button>
               <button type="button" id="elev-close-btn" class="elev-close-btn" aria-label="고도 프로필 닫기">×</button>
             </div>
           </div>
@@ -407,18 +458,32 @@
               <strong id="elev-stat-min">0m</strong>
             </div>
             <div class="elev-stat-item">
-              <span class="elev-stat-label">총 단면 거리</span>
+              <span class="elev-stat-label">단면 거리</span>
               <strong id="elev-stat-dist">0 km</strong>
             </div>
             <div class="elev-stat-item">
-              <span class="elev-stat-label">평균 경사도</span>
+              <span class="elev-stat-label">누적 상승/하강</span>
+              <strong id="elev-stat-gain">+0m / -0m</strong>
+            </div>
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">최대 경사</span>
               <strong id="elev-stat-slope">0%</strong>
             </div>
           </div>
 
           <div class="elev-chart-container" id="elev-chart-container">
+            <canvas id="elev-slice-webgl" class="elev-slice-webgl" hidden aria-label="3D 지형 수직 단면 컷 WebGL 뷰"></canvas>
             <svg id="elevation-chart-svg" class="elevation-chart-svg"></svg>
             <div id="elev-chart-tooltip" class="elev-chart-tooltip" hidden></div>
+          </div>
+
+          <div id="elev-slice-legend" class="elev-slice-legend" hidden>
+            <span class="slice-legend-title">지하 지층 단면 (WebGL Depth Cut)</span>
+            <span class="slice-legend-item"><i style="background:#38984c"></i>표토·식생</span>
+            <span class="slice-legend-item"><i style="background:#a36b40"></i>풍화·화산쇄설층</span>
+            <span class="slice-legend-item"><i style="background:#576475"></i>현무암·암반층</span>
+            <span class="slice-legend-item"><i style="background:#242e42"></i>심부 기반암</span>
+            <span class="slice-legend-item"><i style="background:#0ea5e9"></i>해수면 (0m)</span>
           </div>
         </div>
 

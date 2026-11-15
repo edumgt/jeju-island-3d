@@ -1,6 +1,26 @@
 (() => {
   'use strict';
 
+  // Google Maps Platform Demo Key (Case A) Tier 1 Global Quota Defense
+  if (!window.__gmpQuotaListenerInstalled) {
+    window.__gmpQuotaListenerInstalled = true;
+    const prevAuthFailure = window.gm_authFailure;
+    window.gm_authFailure = function () {
+      window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+      if (typeof prevAuthFailure === 'function') {
+        try { prevAuthFailure(); } catch (_) {}
+      }
+    };
+    const origConsoleError = console.error;
+    console.error = function (...args) {
+      origConsoleError.apply(console, args);
+      const msg = args.map((a) => String(a)).join(' ');
+      if (msg.includes('OverQuotaMapError') || msg.includes('QuotaExceededError')) {
+        window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+      }
+    };
+  }
+
   const $ = (selector) => document.querySelector(selector);
 
   // Region Definitions: Jeju Island & Busan Haeundae
@@ -120,6 +140,33 @@
       defaultCamDistance: 170,
       customDefaults: { latMin: 37.620, latMax: 38.225, latPlaceholder: '37.7935', lngMin: 128.360, lngMax: 129.060, lngPlaceholder: '128.8885' },
       presets: window.GANGNEUNG_PRESETS || []
+    },
+    yeongam: {
+      id: 'yeongam',
+      name: '전남 영암',
+      subTitle: 'KIC 스포츠카 서킷·영암호',
+      brandTitle: 'YEONGAM CIRCUIT',
+      brandSub: '전남 영암 코리아 인터내셔널 서킷 3D',
+      brandMark: 'Y',
+      brandColor: '#dc2626',
+      storageKey: 'yeongam-studio-plan-v1',
+      sidebarEyebrow: 'MOTORSPORT & COASTAL RIDGE',
+      sidebarTitle: '영암 F1 스포츠카 서킷을<br>3D로 질주하세요.',
+      sidebarDesc: '5.615km 18개 코너의 코리아 인터내셔널 서킷과 영암호 요트 마리나, 은적산·월출산 능선을 배경으로 레이싱 코스를 입체 탐험해 보세요.',
+      viewerTitle: 'Yeongam KIC Circuit',
+      viewerSub: '전라남도 영암군 · 북위 34.74°',
+      summaryTitle: '나만의 영암 서킷 지도',
+      bounds: { west: 126.382, south: 34.712, east: 126.498, north: 34.782 },
+      mapWidth: 108,
+      mapDepth: 80,
+      heightFactor: 0.014,
+      droneAltitudeMeters: 90,
+      oceanBox: [124, 1.1, 94],
+      oceanRimBox: [126, 0.65, 96],
+      lightPos: [-35, 85, 45],
+      defaultCamDistance: 124,
+      customDefaults: { latMin: 34.712, latMax: 34.782, latPlaceholder: '34.7376', lngMin: 126.382, lngMax: 126.498, lngPlaceholder: '126.4152' },
+      presets: window.YEONGAM_PRESETS || []
     }
   };
 
@@ -145,10 +192,26 @@
     solarLiveSync: false,
     elevationProfileOpen: false,
     elevationTransectMode: 'west-east',
+    customTransect: [],
+    verticalSliceMode: false,
     climateOverlayOpen: false,
     climateChartMode: 'overview',
     terrainDetail: 'adaptive'
   });
+
+  function cleanCustomTransect(rawWaypoints, bounds) {
+    if (window.TransectHelpers && typeof window.TransectHelpers.cleanCustomTransect === 'function') {
+      return window.TransectHelpers.cleanCustomTransect(rawWaypoints, bounds);
+    }
+    if (!Array.isArray(rawWaypoints) || !bounds) return [];
+    return rawWaypoints.slice(0, 160).filter((pt) => {
+      if (!pt || typeof pt !== 'object') return false;
+      const lat = Number(pt.lat);
+      const lng = Number(pt.lng);
+      return Number.isFinite(lat) && Number.isFinite(lng) &&
+        lat >= bounds.south && lat <= bounds.north && lng >= bounds.west && lng <= bounds.east;
+    }).map((pt) => ({ lat: Number(Number(pt.lat).toFixed(6)), lng: Number(Number(pt.lng).toFixed(6)) }));
+  }
 
   function cleanState(raw, region) {
     if (!raw || typeof raw !== 'object' || !Array.isArray(raw.markers)) throw new Error('지도 데이터 형식이 올바르지 않습니다.');
@@ -168,6 +231,8 @@
       category: typeof marker.category === 'string' ? marker.category.slice(0, 30) : '내 장소',
       lat: Number(marker.lat),
       lng: Number(marker.lng),
+      address: typeof marker.address === 'string' ? marker.address.slice(0, 120) : undefined,
+      placeId: typeof marker.placeId === 'string' ? marker.placeId.slice(0, 120) : undefined,
       custom: Boolean(marker.custom)
     }));
     return {
@@ -186,7 +251,9 @@
       solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 810,
       solarLiveSync: Boolean(raw.solarLiveSync),
       elevationProfileOpen: Boolean(raw.elevationProfileOpen),
-      elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east',
+      elevationTransectMode: ['west-east', 'north-south', 'places-route', 'custom-path'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east',
+      customTransect: cleanCustomTransect(raw.customTransect, bounds),
+      verticalSliceMode: Boolean(raw.verticalSliceMode),
       climateOverlayOpen: Boolean(raw.climateOverlayOpen) && !Boolean(raw.elevationProfileOpen),
       climateChartMode: ['overview', 'sunshine', 'marine'].includes(raw.climateChartMode) ? raw.climateChartMode : 'overview',
       terrainDetail: ['adaptive', 'high', 'eco'].includes(raw.terrainDetail) ? raw.terrainDetail : 'adaptive'
@@ -259,7 +326,23 @@
 
       if (params.has('transect')) {
         const tr = params.get('transect');
-        if (['west-east', 'north-south', 'places-route'].includes(tr)) state.elevationTransectMode = tr;
+        if (['west-east', 'north-south', 'places-route', 'custom-path'].includes(tr)) state.elevationTransectMode = tr;
+      }
+
+      if (params.has('ct')) {
+        const pairs = params.get('ct').split(';').map((pair) => {
+          const [latStr, lngStr] = pair.split(',');
+          return { lat: Number(latStr), lng: Number(lngStr) };
+        });
+        const cleanedCt = cleanCustomTransect(pairs, getRegion().bounds);
+        if (cleanedCt.length >= 2) {
+          state.customTransect = cleanedCt;
+          state.elevationTransectMode = 'custom-path';
+        }
+      }
+
+      if (params.has('slice')) {
+        state.verticalSliceMode = params.get('slice') === '1' || params.get('slice') === 'true';
       }
 
       if (params.has('climate')) {
@@ -350,10 +433,14 @@
   let windGain = null;
   let ambientNoiseNode = null;
 
-  // Incheon Bridge, Airport, Gangneung Landmarks & Night Stars & Elevation Indicator
+  // Incheon Bridge, Airport, Gangneung Landmarks, Yeongam Circuit & Night Stars
   let incheonBridgeGroup = null;
   let incheonAirportGroup = null;
   let gangneungLandmarksGroup = null;
+  let yeongamCircuitGroup = null;
+  let yeongamTrackCurve = null;
+  let yeongamAnimCars = [];
+  let yeongamEmissiveMaterials = [];
   let airportAnimPlane = null;
   let airportFlightCurve = null;
   let airportFlightPhase = 0;
@@ -361,12 +448,32 @@
   let starsPoints = null;
   let starsGeo = null;
   let elevationPointerMesh = null;
+  let elevationTransectGroup = null;
+  let verticalSliceCutGroup = null;
+  let activeSlicePlane = null;
+  let activeSlicePlaneParams = null;
+  const _sliceNormalVec = new THREE.Vector3();
+  const _sliceAnchorVec = new THREE.Vector3();
+  let sliceRenderer = null;
+  let sliceScene = null;
+  let sliceCamera = null;
+  let sliceBlockGroup = null;
+  let sliceCursorMesh = null;
+  let slicePanelProjection = null;
+  let activeTransectSamples = [];
+  let activeTransectHoverRefs = null;
+  let drawingTransect = false;
+  let isDraggingTransect = false;
+  let draftTransectWaypoints = [];
+  let lastDragRenderTime = 0;
   let solarPlaying = false;
   let solarSpeed = 10;
   let currentSolarPosition = null;
   let cameraFlyTarget = null;
   const _planePos = new THREE.Vector3();
   const _planeNextPos = new THREE.Vector3();
+  const _carPos = new THREE.Vector3();
+  const _carNextPos = new THREE.Vector3();
 
   let regionCaches = {}; // Caches for heightData, textures, outline, roads per region
   let renderedHeightScale, renderedMapStyle, renderedWeather, renderedTerrainDetail;
@@ -387,6 +494,27 @@
   const viewer = $('#viewer');
   const canvasContainer = $('#canvas-container');
   const markerLayer = $('#marker-layer');
+
+  let quotaBannerDismissed = false;
+  function showGmpQuotaBanner() {
+    if (quotaBannerDismissed) return;
+    const banner = $('#gmp-quota-banner');
+    if (banner) banner.hidden = false;
+  }
+  window.addEventListener('gmp-quota-exceeded', showGmpQuotaBanner);
+
+  function createSessionToken() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  let searchSessionToken = createSessionToken();
+  let searchDebounceTimer = null;
+  let searchAbortController = null;
+  let liveSuggestions = [];
+  let liveSearchMeta = { loading: false, mode: '', statusText: '', empty: false };
 
   function showToast(message) {
     const toast = $('#toast');
@@ -439,6 +567,7 @@
     if (currentRegionId === 'haeundae') return window.HAEUNDAE_OUTLINE;
     if (currentRegionId === 'incheon') return window.INCHEON_OUTLINE;
     if (currentRegionId === 'gangneung') return window.GANGNEUNG_OUTLINE;
+    if (currentRegionId === 'yeongam') return window.YEONGAM_OUTLINE;
     return [];
   }
 
@@ -463,6 +592,11 @@
         tags: { highway: road.type, name: road.name },
         geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
       })) : [];
+    } else if (currentRegionId === 'yeongam') {
+      return Array.isArray(window.YEONGAM_ROADS) ? window.YEONGAM_ROADS.map((road) => ({
+        tags: { highway: road.type, name: road.name },
+        geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
+      })) : [];
     }
     return [];
   }
@@ -478,6 +612,9 @@
     }
     if (currentRegionId === 'gangneung' && typeof window.inGangneungLand === 'function') {
       return window.inGangneungLand(lng, lat);
+    }
+    if (currentRegionId === 'yeongam' && typeof window.inYeongamLand === 'function') {
+      return window.inYeongamLand(lng, lat);
     }
     const outline = getOutline();
     if (!outline || !outline.length) return true;
@@ -519,7 +656,9 @@
       ? 2000
       : (currentRegionId === 'haeundae'
         ? 650
-        : (currentRegionId === 'gangneung' ? 1800 : 300));
+        : (currentRegionId === 'gangneung'
+          ? 1800
+          : (currentRegionId === 'yeongam' ? 850 : 300)));
     return ((h00 * (1 - dx) + h10 * dx) * (1 - dy) +
       (h01 * (1 - dx) + h11 * dx) * dy) / 255 * maxMeters;
   }
@@ -550,7 +689,9 @@
     if (!matching.length) {
       const empty = document.createElement('div');
       empty.className = 'empty-state';
-      empty.textContent = '검색 결과가 없습니다.';
+      empty.textContent = liveSuggestions.length
+        ? '기본 추천 장소 중 일치 항목이 없어요. 위 지도 검색 추천을 선택해 보세요.'
+        : '검색 결과가 없습니다.';
       list.append(empty);
       return;
     }
@@ -578,6 +719,377 @@
       card.append(icon, copy, add);
       list.append(card);
     }
+  }
+
+  function renderGeocodeSuggestions() {
+    const block = $('#search-suggestions-block');
+    const list = $('#geocode-suggestion-list');
+    const modeLabel = $('#geocode-mode-label');
+    const statusLabel = $('#geocode-status');
+    if (!block || !list) return;
+
+    const query = $('#place-search') ? $('#place-search').value.trim() : '';
+    const hasContent =
+      Boolean(query) || liveSearchMeta.loading || liveSuggestions.length > 0 || liveSearchMeta.empty;
+    block.hidden = !hasContent;
+    if (!hasContent) {
+      list.replaceChildren();
+      return;
+    }
+
+    if (modeLabel) {
+      modeLabel.textContent =
+        liveSearchMeta.mode === 'reverse-geocode' ? '역지오코딩 위치 추천' : '지도 위치 추천';
+    }
+    if (statusLabel) {
+      statusLabel.textContent = liveSearchMeta.loading
+        ? '추천 위치 찾는 중...'
+        : liveSearchMeta.statusText || `${liveSuggestions.length}건`;
+    }
+
+    list.replaceChildren();
+    if (liveSearchMeta.loading && !liveSuggestions.length) {
+      return;
+    }
+    if (!liveSuggestions.length) {
+      if (liveSearchMeta.empty) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = liveSearchMeta.statusText || '일치하는 지도 위치가 없습니다.';
+        list.append(empty);
+      }
+      return;
+    }
+
+    const activeRegion = getRegion();
+    liveSuggestions.forEach((item, idx) => {
+      const matchedName =
+        item.matchedRegionId && REGIONS[item.matchedRegionId]
+          ? REGIONS[item.matchedRegionId].name
+          : null;
+      const isDifferentRegion = Boolean(
+        item.matchedRegionId && item.matchedRegionId !== activeRegion.id
+      );
+      const isOutsideAll =
+        item.lat !== null && item.lng !== null && !item.inBounds && !isDifferentRegion;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `geocode-suggestion-card${isOutsideAll ? ' is-out-of-bounds' : ''}`;
+      btn.dataset.suggestionIdx = String(idx);
+
+      const main = document.createElement('span');
+      main.className = 'geocode-suggestion-main';
+
+      const title = document.createElement('strong');
+      title.className = 'geocode-suggestion-title';
+      title.textContent = item.name;
+      main.append(title);
+
+      if (item.address) {
+        const addr = document.createElement('span');
+        addr.className = 'geocode-suggestion-address';
+        addr.textContent = item.address;
+        main.append(addr);
+      }
+
+      const meta = document.createElement('span');
+      meta.className = 'geocode-suggestion-meta';
+
+      const tag = document.createElement('span');
+      tag.className = 'geocode-region-tag';
+      if (item.inBounds) {
+        tag.textContent = `${activeRegion.name} 영역 내`;
+      } else if (isDifferentRegion && matchedName) {
+        tag.textContent = `${matchedName} 지도로 이동`;
+      } else if (item.lat !== null && item.lng !== null) {
+        tag.textContent = `${item.lat.toFixed(4)}° N · ${item.lng.toFixed(4)}° E`;
+      } else {
+        tag.textContent = item.category || '지도 검색';
+      }
+      meta.append(tag);
+
+      if (Number.isFinite(item.distanceKm) && item.distanceKm > 0) {
+        const dist = document.createElement('span');
+        dist.textContent = `· ${item.distanceKm}km`;
+        meta.append(dist);
+      }
+
+      main.append(meta);
+
+      const action = document.createElement('span');
+      action.className = 'geocode-suggestion-action';
+      action.textContent = isDifferentRegion ? '이동·표시' : '+ 표시';
+
+      btn.append(main, action);
+      list.append(btn);
+    });
+  }
+
+  function clearLiveSearch() {
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+    if (searchAbortController) {
+      searchAbortController.abort();
+      searchAbortController = null;
+    }
+    liveSuggestions = [];
+    liveSearchMeta = { loading: false, mode: '', statusText: '', empty: false };
+    renderGeocodeSuggestions();
+  }
+
+  async function reverseGeocodeCoordinates(lat, lng, options = {}) {
+    const r = getRegion();
+    const helpers = window.PlaceSearchHelpers;
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lng: String(lng),
+      region: r.id,
+      south: String(r.bounds.south),
+      west: String(r.bounds.west),
+      north: String(r.bounds.north),
+      east: String(r.bounds.east)
+    });
+
+    if (options.updateSuggestions) {
+      liveSearchMeta = { loading: true, mode: 'reverse-geocode', statusText: '좌표 확인 중...', empty: false };
+      renderGeocodeSuggestions();
+    }
+
+    try {
+      const res = await fetch(`/api/geocode/reverse?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (helpers && helpers.isQuotaExceededResponse(res.status, data)) {
+        window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+        if (options.updateSuggestions) {
+          liveSearchMeta = { loading: false, mode: 'reverse-geocode', statusText: '할당량 초과', empty: false };
+          renderGeocodeSuggestions();
+        }
+        return [];
+      }
+      const list = Array.isArray(data.suggestions) ? data.suggestions : [];
+      if (options.updateSuggestions) {
+        liveSuggestions = list;
+        liveSearchMeta = {
+          loading: false,
+          mode: 'reverse-geocode',
+          statusText: list.length ? `${lat.toFixed(4)}, ${lng.toFixed(4)} 역지오코딩` : '주변 주소 정보 없음',
+          empty: list.length === 0
+        };
+        renderGeocodeSuggestions();
+      }
+      if (options.updateCustomForm && list.length > 0) {
+        const top = list[0];
+        const statusEl = $('#reverse-pick-status');
+        if (statusEl) {
+          statusEl.hidden = false;
+          statusEl.textContent = `역지오코딩 결과: ${top.address || top.name}`;
+        }
+        const nameInp = $('#custom-name');
+        if (nameInp && (!nameInp.value.trim() || nameInp.dataset.autofilled === 'true')) {
+          nameInp.value = String(top.name || '').slice(0, 30);
+          nameInp.dataset.autofilled = 'true';
+        }
+      }
+      return list;
+    } catch (_) {
+      if (options.updateSuggestions) {
+        liveSearchMeta = { loading: false, mode: 'reverse-geocode', statusText: '', empty: false };
+        renderGeocodeSuggestions();
+      }
+      return [];
+    }
+  }
+
+  function scheduleLivePlaceSearch(rawQuery) {
+    const query = String(rawQuery || '').trim();
+    const clearBtn = $('#place-search-clear');
+    if (clearBtn) clearBtn.hidden = !query;
+
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    if (searchAbortController) {
+      searchAbortController.abort();
+      searchAbortController = null;
+    }
+
+    if (!query) {
+      liveSuggestions = [];
+      liveSearchMeta = { loading: false, mode: '', statusText: '', empty: false };
+      renderGeocodeSuggestions();
+      renderPresets();
+      return;
+    }
+
+    const helpers = window.PlaceSearchHelpers;
+    const isCoordQuery = Boolean(helpers && helpers.parseCoordinateQuery(query));
+    liveSearchMeta = {
+      loading: true,
+      mode: isCoordQuery ? 'reverse-geocode' : 'autocomplete',
+      statusText: '추천 위치 찾는 중...',
+      empty: false
+    };
+    renderGeocodeSuggestions();
+
+    searchDebounceTimer = setTimeout(async () => {
+      const r = getRegion();
+      const centerLat = (r.bounds.south + r.bounds.north) * 0.5;
+      const centerLng = (r.bounds.west + r.bounds.east) * 0.5;
+      const params = new URLSearchParams({
+        q: query,
+        region: r.id,
+        lat: String(centerLat),
+        lng: String(centerLng),
+        south: String(r.bounds.south),
+        west: String(r.bounds.west),
+        north: String(r.bounds.north),
+        east: String(r.bounds.east),
+        sessionToken: searchSessionToken
+      });
+
+      const controller = new AbortController();
+      searchAbortController = controller;
+
+      try {
+        const res = await fetch(`/api/places/suggest?${params.toString()}`, {
+          signal: controller.signal
+        });
+        const data = await res.json().catch(() => ({}));
+        if (controller.signal.aborted) return;
+
+        if (helpers && helpers.isQuotaExceededResponse(res.status, data)) {
+          window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+          liveSuggestions = [];
+          liveSearchMeta = { loading: false, mode: isCoordQuery ? 'reverse-geocode' : 'autocomplete', statusText: '할당량 초과', empty: false };
+          renderGeocodeSuggestions();
+          renderPresets();
+          return;
+        }
+
+        const results = Array.isArray(data.suggestions) ? data.suggestions : [];
+        liveSuggestions = results;
+        liveSearchMeta = {
+          loading: false,
+          mode: data.mode || (isCoordQuery ? 'reverse-geocode' : 'autocomplete'),
+          statusText: results.length
+            ? `${results.length}곳 추천`
+            : res.status === 503
+              ? '추천 장소 목록에서 검색 중'
+              : '검색된 위치가 없어요',
+          empty: results.length === 0 && res.status !== 503
+        };
+        renderGeocodeSuggestions();
+        renderPresets();
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        liveSuggestions = [];
+        liveSearchMeta = { loading: false, mode: '', statusText: '', empty: false };
+        renderGeocodeSuggestions();
+      }
+    }, 260);
+  }
+
+  async function selectSuggestedPlace(suggestion) {
+    if (!suggestion) return;
+    const helpers = window.PlaceSearchHelpers;
+    const r = getRegion();
+    let resolved = suggestion;
+
+    if (suggestion.needsDetails && suggestion.placeId) {
+      liveSearchMeta = { ...liveSearchMeta, loading: true, statusText: '좌표 확인 중...' };
+      renderGeocodeSuggestions();
+      try {
+        const params = new URLSearchParams({
+          placeId: suggestion.placeId,
+          region: r.id,
+          south: String(r.bounds.south),
+          west: String(r.bounds.west),
+          north: String(r.bounds.north),
+          east: String(r.bounds.east),
+          sessionToken: searchSessionToken
+        });
+        const res = await fetch(`/api/places/details?${params.toString()}`);
+        const data = await res.json().catch(() => ({}));
+        searchSessionToken = createSessionToken();
+
+        if (helpers && helpers.isQuotaExceededResponse(res.status, data)) {
+          window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+          liveSearchMeta = { ...liveSearchMeta, loading: false, statusText: '할당량 초과' };
+          renderGeocodeSuggestions();
+          return;
+        }
+        if (!res.ok || !data.place) {
+          liveSearchMeta = { ...liveSearchMeta, loading: false, statusText: '좌표를 가져오지 못했습니다' };
+          renderGeocodeSuggestions();
+          showToast('선택한 장소의 좌표를 불러오지 못했어요.');
+          return;
+        }
+        resolved = data.place;
+        if (!resolved.address && data.reverseContext && data.reverseContext.address) {
+          resolved.address = data.reverseContext.address;
+        }
+      } catch (_) {
+        liveSearchMeta = { ...liveSearchMeta, loading: false, statusText: '' };
+        renderGeocodeSuggestions();
+        showToast('선택한 장소의 좌표를 불러오지 못했어요.');
+        return;
+      }
+    }
+
+    const lat = Number(resolved.lat);
+    const lng = Number(resolved.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      showToast('선택한 장소의 좌표 정보가 없습니다.');
+      return;
+    }
+
+    const targetRegionId = helpers ? helpers.findMatchingRegionId(lat, lng, REGIONS) : null;
+    if (!targetRegionId) {
+      liveSearchMeta = { ...liveSearchMeta, loading: false, statusText: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
+      renderGeocodeSuggestions();
+      showToast(`${resolved.name}(${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E)은(는) 5개 3D 지형 영역 밖에 있습니다.`);
+      return;
+    }
+
+    if (targetRegionId !== currentRegionId) {
+      await switchRegion(targetRegionId);
+    }
+
+    const existing = state.markers.find(
+      (m) =>
+        (resolved.placeId && m.placeId === resolved.placeId) ||
+        (Math.abs(m.lat - lat) < 0.0002 && Math.abs(m.lng - lng) < 0.0002)
+    );
+    if (existing) {
+      selectMarker(existing.id);
+      focusOnMarker(existing.id);
+      showToast(`${existing.name} 위치로 이동했어요.`);
+    } else {
+      const markerId = `place-${Date.now().toString(36)}`;
+      const markerName = String(resolved.name || '검색한 장소').trim().slice(0, 30);
+      commit(() => {
+        state.markers.push({
+          id: markerId,
+          name: markerName,
+          category: resolved.category || '지도 검색',
+          lat,
+          lng,
+          address: resolved.address || '',
+          placeId: resolved.placeId || '',
+          custom: true
+        });
+        state.selectedId = markerId;
+      });
+      focusOnMarker(markerId);
+      showToast(`${markerName}을(를) 지도에 표시하고 이동했어요.`);
+    }
+
+    if (window.innerWidth <= 900) {
+      setLnbOpen(false);
+    }
+    liveSearchMeta = { ...liveSearchMeta, loading: false, statusText: '지도에 표시됨' };
+    renderGeocodeSuggestions();
   }
 
   function renderMarkerList() {
@@ -661,17 +1173,43 @@
     updateSolarLighting(0);
 
     // Elevation Profile UI Sync
+    const isSliceActive = Boolean(state.elevationProfileOpen && state.verticalSliceMode);
     const elevPanel = $('#elevation-profile-panel');
-    if (elevPanel) elevPanel.hidden = !state.elevationProfileOpen;
+    if (elevPanel) {
+      elevPanel.hidden = !state.elevationProfileOpen;
+      elevPanel.classList.toggle('is-slice-mode', isSliceActive);
+      elevPanel.dataset.transectMode = state.elevationTransectMode || 'west-east';
+      elevPanel.dataset.drawing = String(drawingTransect);
+      elevPanel.dataset.sliceMode = String(isSliceActive);
+    }
     const elevToggleBtn = $('#elevation-toggle');
     if (elevToggleBtn) {
       elevToggleBtn.classList.toggle('is-active', state.elevationProfileOpen);
       elevToggleBtn.setAttribute('aria-pressed', String(state.elevationProfileOpen));
     }
+    const elevSliceBtn = $('#elev-slice-btn');
+    if (elevSliceBtn) {
+      elevSliceBtn.classList.toggle('is-active', isSliceActive);
+      elevSliceBtn.setAttribute('aria-pressed', String(isSliceActive));
+    }
+    const elevSliceCanvas = $('#elev-slice-webgl');
+    if (elevSliceCanvas) elevSliceCanvas.hidden = !isSliceActive;
+    const elevSliceLegend = $('#elev-slice-legend');
+    if (elevSliceLegend) elevSliceLegend.hidden = !isSliceActive;
     document.querySelectorAll('.elev-mode-btn').forEach((btn) => {
       btn.classList.toggle('is-active', btn.dataset.transect === state.elevationTransectMode);
     });
-    if (state.elevationProfileOpen) updateElevationProfile();
+    const elevClearBtn = $('#elev-clear-path-btn');
+    if (elevClearBtn) {
+      elevClearBtn.hidden = !(Array.isArray(state.customTransect) && state.customTransect.length >= 2);
+    }
+    if (!state.elevationProfileOpen) {
+      if (drawingTransect) setDrawingTransect(false);
+      clear3DTransectOverlay();
+      syncElevationFocusSample(null, 'close');
+    } else if (!isDraggingTransect) {
+      updateElevationProfile();
+    }
 
     // Yearly Climate Overlay UI Sync
     const climatePanel = $('#climate-overlay-panel');
@@ -781,10 +1319,44 @@
   }
 
   function setPickingLocation(enabled) {
+    if (enabled && drawingTransect) setDrawingTransect(false);
     pickingLocation = enabled;
     viewer.classList.toggle('is-picking', enabled);
     $('#pick-instruction').hidden = !enabled;
     markerLayer.style.display = state.showLabels && !enabled ? '' : 'none';
+  }
+
+  function setDrawingTransect(enabled) {
+    const next = Boolean(enabled);
+    if (next) {
+      if (pickingLocation) setPickingLocation(false);
+      if (droneMode) setDroneMode(false);
+      state.elevationProfileOpen = true;
+      state.climateOverlayOpen = false;
+    }
+    drawingTransect = next;
+    isDraggingTransect = false;
+    if (controls) controls.enabled = !next;
+    viewer.classList.toggle('is-drawing-transect', next);
+    const instrEl = $('#transect-instruction');
+    if (instrEl) instrEl.hidden = !next;
+    const drawBtn = $('#elev-draw-btn');
+    if (drawBtn) {
+      drawBtn.classList.toggle('is-drawing', next);
+      drawBtn.setAttribute('aria-pressed', String(next));
+      drawBtn.textContent = next ? '✓ 드래그 종료' : '✏️ 3D 경로 드래그';
+      if (!next) drawBtn.blur();
+    }
+    const elevPanel = $('#elevation-profile-panel');
+    if (elevPanel) {
+      elevPanel.hidden = !state.elevationProfileOpen;
+      elevPanel.dataset.drawing = String(next);
+    }
+    const elevToggleBtn = $('#elevation-toggle');
+    if (elevToggleBtn) {
+      elevToggleBtn.classList.toggle('is-active', state.elevationProfileOpen);
+      elevToggleBtn.setAttribute('aria-pressed', String(state.elevationProfileOpen));
+    }
   }
 
   function savePlan() {
@@ -846,6 +1418,13 @@
       url.searchParams.set('elev', '1');
       if (state.elevationTransectMode && state.elevationTransectMode !== 'west-east') {
         url.searchParams.set('transect', state.elevationTransectMode);
+      }
+      if (state.elevationTransectMode === 'custom-path' && Array.isArray(state.customTransect) && state.customTransect.length >= 2) {
+        const ctStr = state.customTransect.slice(0, 40).map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join(';');
+        url.searchParams.set('ct', ctStr);
+      }
+      if (state.verticalSliceMode) {
+        url.searchParams.set('slice', '1');
       }
     }
 
@@ -939,6 +1518,10 @@
       // Frame Gyeongpodae, Gyeongpo Lake & East Sea coast in the foreground with distant Seoraksan rising on the NW skyline
       controls.target.set(6, -11, 2);
       camera.position.set(distance * 0.44, distance * 0.34 - 16, distance * 0.62);
+    } else if (currentRegionId === 'yeongam') {
+      // Frame Yeongam KIC F1 circuit, Grandstand & Marina waterfront in foreground with Eunjeoksan / Wolchulsan ridge behind
+      controls.target.set(-14, -7.5, 8);
+      camera.position.set(-44, 24, 56);
     } else {
       controls.target.set(0, -15, 0);
       camera.position.set(distance * 0.45, distance * 0.53 - 17, distance * 0.72);
@@ -1068,11 +1651,11 @@
     $('#sidebar-title').innerHTML = r.sidebarTitle;
     $('#sidebar-desc').textContent = r.sidebarDesc;
     const kicker = $('#sidebar-kicker');
-    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : (r.id === 'haeundae' ? 'EXPLORE HAEUNDAE' : (r.id === 'gangneung' ? 'EXPLORE GANGNEUNG' : 'EXPLORE INCHEON'));
+    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : (r.id === 'haeundae' ? 'EXPLORE HAEUNDAE' : (r.id === 'gangneung' ? 'EXPLORE GANGNEUNG' : (r.id === 'yeongam' ? 'EXPLORE YEONGAM' : 'EXPLORE INCHEON')));
     const styleLead = $('#panel-lead-style');
-    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : (r.id === 'haeundae' ? '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.' : (r.id === 'gangneung' ? '경포호와 동해 해안, 멀리 설악산 대청봉 능선의 고도를 살펴보세요.' : '영종도 백운산과 송도, 인천대교의 높낮이를 살펴보세요.'));
+    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : (r.id === 'haeundae' ? '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.' : (r.id === 'gangneung' ? '경포호와 동해 해안, 멀리 설악산 대청봉 능선의 고도를 살펴보세요.' : (r.id === 'yeongam' ? '코리아 인터내셔널 서킷 평지와 은적산·월출산 산악 배경의 높낮이를 살펴보세요.' : '영종도 백운산과 송도, 인천대교의 높낮이를 살펴보세요.')));
     const customName = $('#custom-name');
-    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : (r.id === 'haeundae' ? '예: 나만의 해운대 장소' : (r.id === 'gangneung' ? '예: 나만의 강릉·설악 장소' : '예: 나만의 인천 장소'));
+    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : (r.id === 'haeundae' ? '예: 나만의 해운대 장소' : (r.id === 'gangneung' ? '예: 나만의 강릉·설악 장소' : (r.id === 'yeongam' ? '예: 나만의 영암 서킷 포인트' : '예: 나만의 인천 장소')));
 
     // Viewer badges & aria-label
     if (viewer) viewer.setAttribute('aria-label', `${r.name} 3D 지도`);
@@ -1092,14 +1675,21 @@
 
     // Search reset
     $('#place-search').value = '';
+    const clearBtn = $('#place-search-clear');
+    if (clearBtn) clearBtn.hidden = true;
+    const revPickStatus = $('#reverse-pick-status');
+    if (revPickStatus) revPickStatus.hidden = true;
+    clearLiveSearch();
   }
 
   async function switchRegion(newRegionId) {
     if (newRegionId === currentRegionId) return;
+    if (drawingTransect) setDrawingTransect(false);
     const prevClimateOpen = Boolean(state.climateOverlayOpen);
     const prevClimateMode = state.climateChartMode || 'overview';
     const prevElevOpen = Boolean(state.elevationProfileOpen);
     const prevElevMode = state.elevationTransectMode || 'west-east';
+    const prevVerticalSlice = Boolean(state.verticalSliceMode);
     persist(); // Save current region state first
 
     currentRegionId = newRegionId;
@@ -1114,7 +1704,11 @@
       state.elevationProfileOpen = false;
     } else if (prevElevOpen) {
       state.elevationProfileOpen = true;
-      state.elevationTransectMode = prevElevMode;
+      state.elevationTransectMode =
+        prevElevMode === 'custom-path' && (!state.customTransect || state.customTransect.length < 2)
+          ? 'west-east'
+          : prevElevMode;
+      state.verticalSliceMode = prevVerticalSlice;
       state.climateOverlayOpen = false;
     }
     undoStack.length = 0;
@@ -1171,7 +1765,63 @@
     document.querySelectorAll('.panel-tab').forEach((button) => {
       button.addEventListener('click', () => setTab(button.dataset.tab));
     });
-    $('#place-search').addEventListener('input', renderPresets);
+
+    const gmpBannerDismiss = $('#gmp-quota-dismiss');
+    if (gmpBannerDismiss) {
+      gmpBannerDismiss.addEventListener('click', () => {
+        quotaBannerDismissed = true;
+        const banner = $('#gmp-quota-banner');
+        if (banner) banner.hidden = true;
+      });
+    }
+
+    const placeSearchInput = $('#place-search');
+    placeSearchInput.addEventListener('input', (event) => {
+      renderPresets();
+      scheduleLivePlaceSearch(event.target.value);
+    });
+    const placeSearchClear = $('#place-search-clear');
+    if (placeSearchClear) {
+      placeSearchClear.addEventListener('click', () => {
+        placeSearchInput.value = '';
+        placeSearchClear.hidden = true;
+        searchSessionToken = createSessionToken();
+        clearLiveSearch();
+        renderPresets();
+        placeSearchInput.focus();
+      });
+    }
+    const reverseCenterBtn = $('#reverse-center-btn');
+    if (reverseCenterBtn) {
+      reverseCenterBtn.addEventListener('click', () => {
+        const r = getRegion();
+        let targetLat = (r.bounds.south + r.bounds.north) * 0.5;
+        let targetLng = (r.bounds.west + r.bounds.east) * 0.5;
+        if (controls && controls.target) {
+          targetLat = r.bounds.north - (controls.target.z / r.mapDepth + 0.5) * (r.bounds.north - r.bounds.south);
+          targetLng = r.bounds.west + (controls.target.x / r.mapWidth + 0.5) * (r.bounds.east - r.bounds.west);
+        }
+        reverseGeocodeCoordinates(targetLat, targetLng, { updateSuggestions: true });
+      });
+    }
+    const geocodeSuggestionList = $('#geocode-suggestion-list');
+    if (geocodeSuggestionList) {
+      geocodeSuggestionList.addEventListener('click', (event) => {
+        const card = event.target.closest('[data-suggestion-idx]');
+        if (!card) return;
+        const idx = Number(card.dataset.suggestionIdx);
+        if (Number.isFinite(idx) && liveSuggestions[idx]) {
+          selectSuggestedPlace(liveSuggestions[idx]);
+        }
+      });
+    }
+    const customNameInp = $('#custom-name');
+    if (customNameInp) {
+      customNameInp.addEventListener('input', () => {
+        customNameInp.dataset.autofilled = 'false';
+      });
+    }
+
     $('#preset-list').addEventListener('click', (event) => {
       const button = event.target.closest('[data-preset]');
       if (!button) return;
@@ -1359,6 +2009,7 @@
     const elevToggleBtn = $('#elevation-toggle');
     if (elevToggleBtn) {
       elevToggleBtn.addEventListener('click', () => {
+        if (state.elevationProfileOpen && drawingTransect) setDrawingTransect(false);
         commit(() => {
           const nextOpen = !state.elevationProfileOpen;
           state.elevationProfileOpen = nextOpen;
@@ -1370,14 +2021,69 @@
     const elevCloseBtn = $('#elev-close-btn');
     if (elevCloseBtn) {
       elevCloseBtn.addEventListener('click', () => {
+        if (drawingTransect) setDrawingTransect(false);
         commit(() => { state.elevationProfileOpen = false; });
+      });
+    }
+
+    const elevSliceBtn = $('#elev-slice-btn');
+    if (elevSliceBtn) {
+      elevSliceBtn.addEventListener('click', () => {
+        commit(() => {
+          state.verticalSliceMode = !state.verticalSliceMode;
+          if (state.verticalSliceMode) {
+            state.elevationProfileOpen = true;
+            state.climateOverlayOpen = false;
+          }
+        });
+        showToast(state.verticalSliceMode
+          ? '🪨 Vertical Slice 3D 지형 절단 모드를 켰어요. 지형 내부 지층 단면을 확인하세요.'
+          : 'Vertical Slice 모드를 끄고 전체 지형을 복원했어요.');
+      });
+    }
+
+    const elevDrawBtn = $('#elev-draw-btn');
+    if (elevDrawBtn) {
+      elevDrawBtn.addEventListener('click', () => {
+        const nextDraw = !drawingTransect;
+        setDrawingTransect(nextDraw);
+        if (nextDraw) {
+          showToast('3D 지형 위를 마우스로 드래그해 고도 단면 경로를 그려보세요.');
+        }
+      });
+    }
+
+    const cancelTransectDrawBtn = $('#cancel-transect-draw');
+    if (cancelTransectDrawBtn) {
+      cancelTransectDrawBtn.addEventListener('click', () => {
+        setDrawingTransect(false);
+      });
+    }
+
+    const elevClearPathBtn = $('#elev-clear-path-btn');
+    if (elevClearPathBtn) {
+      elevClearPathBtn.addEventListener('click', () => {
+        commit(() => {
+          state.customTransect = [];
+          if (state.elevationTransectMode === 'custom-path') {
+            state.elevationTransectMode = 'west-east';
+          }
+        });
+        showToast('직접 그린 단면 경로를 초기화했어요.');
       });
     }
 
     document.querySelectorAll('.elev-mode-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const mode = btn.dataset.transect;
+        if (mode !== 'custom-path' && drawingTransect) {
+          setDrawingTransect(false);
+        }
         commit(() => { state.elevationTransectMode = mode; });
+        if (mode === 'custom-path' && (!state.customTransect || state.customTransect.length < 2)) {
+          setDrawingTransect(true);
+          showToast('3D 지형 위를 드래그해 직접 단면 경로를 그려보세요.');
+        }
       });
     });
 
@@ -1508,8 +2214,14 @@
     const lnbBackdrop = $('#lnb-backdrop');
     if (lnbBackdrop) lnbBackdrop.addEventListener('click', () => setLnbOpen(false));
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && $('#sidebar')?.classList.contains('is-open')) {
-        setLnbOpen(false);
+      if (event.key === 'Escape') {
+        if (drawingTransect) {
+          setDrawingTransect(false);
+          return;
+        }
+        if ($('#sidebar')?.classList.contains('is-open')) {
+          setLnbOpen(false);
+        }
       }
     });
     applyRegionUI();
@@ -1694,6 +2406,40 @@
         heightData,
         textures: { natural, elevation, normal, roughness }
       };
+    } else if (regionId === 'yeongam') {
+      if (typeof window.createYeongamAssets !== 'function') {
+        throw new Error('전남 영암 KIC 서킷 3D 에셋 생성기를 찾을 수 없습니다.');
+      }
+      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas, roughnessCanvas } = window.createYeongamAssets();
+      const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
+      const heightData = {
+        width: heightCanvas.width,
+        height: heightCanvas.height,
+        pixels: hCtx.getImageData(0, 0, heightCanvas.width, heightCanvas.height).data
+      };
+
+      const natural = new THREE.CanvasTexture(naturalCanvas);
+      natural.encoding = THREE.sRGBEncoding;
+      natural.anisotropy = maxAniso;
+
+      const elevation = new THREE.CanvasTexture(elevationCanvas);
+      elevation.encoding = THREE.sRGBEncoding;
+      elevation.anisotropy = maxAniso;
+
+      let normal, roughness;
+      if (normalCanvas) {
+        normal = new THREE.CanvasTexture(normalCanvas);
+        normal.anisotropy = maxAniso;
+      }
+      if (roughnessCanvas) {
+        roughness = new THREE.CanvasTexture(roughnessCanvas);
+        roughness.anisotropy = maxAniso;
+      }
+
+      regionCaches.yeongam = {
+        heightData,
+        textures: { natural, elevation, normal, roughness }
+      };
     }
 
     return regionCaches[regionId];
@@ -1841,6 +2587,9 @@
     buildRoads();
     if (currentRegionId === 'incheon') buildIncheonAirport();
     if (currentRegionId === 'gangneung') buildGangneungLandmarks();
+    if (currentRegionId === 'yeongam') buildYeongamCircuit();
+    if (state.elevationProfileOpen) updateElevationProfile();
+    else restoreTerrainFromVerticalSlice();
   }
 
   function roadColor(type) {
@@ -2449,8 +3198,11 @@
     buildIncheonBridge();
     buildIncheonAirport();
     buildGangneungLandmarks();
+    buildYeongamCircuit();
     syncMarkers();
     resetWeatherBounds();
+    if (state.elevationProfileOpen) updateElevationProfile();
+    else clear3DTransectOverlay();
   }
 
   function buildIncheonBridge() {
@@ -3342,6 +4094,299 @@
     scene.add(gangneungLandmarksGroup);
   }
 
+  function buildYeongamCircuit() {
+    if (yeongamCircuitGroup) {
+      disposeObject(yeongamCircuitGroup);
+      yeongamCircuitGroup = null;
+    }
+    yeongamTrackCurve = null;
+    yeongamAnimCars = [];
+    yeongamEmissiveMaterials = [];
+
+    if (currentRegionId !== 'yeongam') return;
+
+    yeongamCircuitGroup = new THREE.Group();
+    yeongamCircuitGroup.name = 'yeongam-kic-circuit';
+
+    const trackRaw = Array.isArray(window.YEONGAM_CIRCUIT_TRACK) ? window.YEONGAM_CIRCUIT_TRACK : [];
+    const openRaw = trackRaw.length > 2 ? trackRaw.slice(0, -1) : trackRaw;
+    if (openRaw.length < 4) {
+      scene.add(yeongamCircuitGroup);
+      return;
+    }
+
+    // 1. Closed 3D Catmull-Rom racing line
+    const curvePts = openRaw.map(([lat, lng]) => {
+      const { x, z } = worldPosition(lat, lng);
+      return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.09, z);
+    });
+    yeongamTrackCurve = new THREE.CatmullRomCurve3(curvePts, true, 'catmullrom', 0.35);
+
+    const sampled = [];
+    const sampleCount = 190;
+    for (let i = 0; i <= sampleCount; i++) {
+      sampled.push(yeongamTrackCurve.getPointAt(i / sampleCount));
+    }
+
+    // Main asphalt racing tarmac ribbon + FIA outer curb trim
+    const curbBorderMesh = createRoadRibbon(sampled, 0.44, 0xdc2626, 0.01);
+    if (curbBorderMesh) yeongamCircuitGroup.add(curbBorderMesh);
+    const trackAsphaltMesh = createRoadRibbon(sampled, 0.33, 0x262b33, 0.024);
+    if (trackAsphaltMesh) yeongamCircuitGroup.add(trackAsphaltMesh);
+
+    // Pit lane ribbon & Karting circuit ribbon
+    if (Array.isArray(window.YEONGAM_PIT_LANE) && window.YEONGAM_PIT_LANE.length > 1) {
+      const pitPts = window.YEONGAM_PIT_LANE.map(([lat, lng]) => {
+        const { x, z } = worldPosition(lat, lng);
+        return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.09, z);
+      });
+      const pitMesh = createRoadRibbon(pitPts, 0.20, 0x3b424d, 0.02);
+      if (pitMesh) yeongamCircuitGroup.add(pitMesh);
+    }
+    if (Array.isArray(window.YEONGAM_KART_TRACK) && window.YEONGAM_KART_TRACK.length > 2) {
+      const kartPts = window.YEONGAM_KART_TRACK.map(([lat, lng]) => {
+        const { x, z } = worldPosition(lat, lng);
+        return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.09, z);
+      });
+      const kartMesh = createRoadRibbon(kartPts, 0.16, 0x334155, 0.02);
+      if (kartMesh) yeongamCircuitGroup.add(kartMesh);
+    }
+
+    // Shared architectural materials
+    const concreteMat = new THREE.MeshStandardMaterial({ color: 0xe6eaef, roughness: 0.78, metalness: 0.08 });
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.45, metalness: 0.55 });
+    const roofCanopyMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35, metalness: 0.22 });
+    const redAccentMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.42, metalness: 0.15 });
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x60a5fa,
+      emissive: 0x1d4ed8,
+      emissiveIntensity: 0.18,
+      roughness: 0.18,
+      metalness: 0.45
+    });
+    yeongamEmissiveMaterials.push({ mat: glassMat, dayInt: 0.18, nightInt: 0.95 });
+
+    // Compute exact Main Straight heading angle from grid -> T1 braking zone
+    const stA = worldPosition(34.7366, 126.4122);
+    const stB = worldPosition(34.7386, 126.4186);
+    const straightAngle = Math.atan2(stB.z - stA.z, stB.x - stA.x);
+
+    // 2. KIC Main Grandstand (tiered stadium seating + sweeping cantilevered canopy)
+    const gsPos = worldPosition(34.7386, 126.4146);
+    const gsY = surfaceHeight(34.7386, 126.4146) + 0.05;
+    const grandstand = new THREE.Group();
+    grandstand.position.set(gsPos.x, gsY, gsPos.z);
+    grandstand.rotation.y = -straightAngle;
+
+    [0.25, 0.52, 0.80].forEach((tierH, idx) => {
+      const tier = new THREE.Mesh(new THREE.BoxGeometry(5.6 - idx * 0.25, tierH, 1.35 - idx * 0.30), concreteMat);
+      tier.position.set(0, tierH * 0.5, -0.35 - idx * 0.25);
+      tier.castShadow = true;
+      tier.receiveShadow = true;
+      grandstand.add(tier);
+    });
+    // Sweeping aerodynamic cantilevered canopy
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.14, 1.72), roofCanopyMat);
+    canopy.position.set(0, 1.62, -0.32);
+    canopy.rotation.x = 0.18;
+    canopy.castShadow = true;
+    grandstand.add(canopy);
+    const canopyTrim = new THREE.Mesh(new THREE.BoxGeometry(5.82, 0.07, 0.14), redAccentMat);
+    canopyTrim.position.set(0, 1.46, 0.52);
+    grandstand.add(canopyTrim);
+
+    [-2.3, -0.8, 0.8, 2.3].forEach((px) => {
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.55, 0.18), steelMat);
+      rib.position.set(px, 0.82, -0.88);
+      grandstand.add(rib);
+    });
+    yeongamCircuitGroup.add(grandstand);
+
+    // 3. Pit Building & Team Garages opposite Grandstand
+    const pitPos = worldPosition(34.7357, 126.4162);
+    const pitY = surfaceHeight(34.7357, 126.4162) + 0.05;
+    const pitBuilding = new THREE.Group();
+    pitBuilding.position.set(pitPos.x, pitY, pitPos.z);
+    pitBuilding.rotation.y = -straightAngle;
+
+    const pitCore = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.70, 1.05), concreteMat);
+    pitCore.position.y = 0.35;
+    pitCore.castShadow = true;
+    pitBuilding.add(pitCore);
+
+    const pitUpperGlass = new THREE.Mesh(new THREE.BoxGeometry(4.35, 0.30, 1.08), glassMat);
+    pitUpperGlass.position.y = 0.60;
+    pitBuilding.add(pitUpperGlass);
+
+    const pitOverhang = new THREE.Mesh(new THREE.BoxGeometry(4.7, 0.09, 1.30), steelMat);
+    pitOverhang.position.y = 0.84;
+    pitOverhang.castShadow = true;
+    pitBuilding.add(pitOverhang);
+
+    yeongamCircuitGroup.add(pitBuilding);
+
+    // 4. Start/Finish Timing Gantry with F1 glowing lights
+    const gantryPos = worldPosition(34.7370, 126.4136);
+    const gantryY = surfaceHeight(34.7370, 126.4136) + 0.05;
+    const gantry = new THREE.Group();
+    gantry.position.set(gantryPos.x, gantryY, gantryPos.z);
+    gantry.rotation.y = -straightAngle;
+
+    [-0.95, 0.95].forEach((sideZ) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.28, 0.12), steelMat);
+      post.position.set(0, 0.64, sideZ);
+      post.castShadow = true;
+      gantry.add(post);
+    });
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 2.08), steelMat);
+    beam.position.set(0, 1.24, 0);
+    beam.castShadow = true;
+    gantry.add(beam);
+
+    const raceLightMat = new THREE.MeshStandardMaterial({
+      color: 0xff2b2b,
+      emissive: 0xef4444,
+      emissiveIntensity: 0.95,
+      roughness: 0.2
+    });
+    yeongamEmissiveMaterials.push({ mat: raceLightMat, dayInt: 0.95, nightInt: 2.2 });
+    [-0.45, -0.22, 0, 0.22, 0.45].forEach((lz) => {
+      const pod = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), raceLightMat);
+      pod.position.set(-0.14, 1.24, lz);
+      gantry.add(pod);
+    });
+    yeongamCircuitGroup.add(gantry);
+
+    // 5. KIC Iconic Race Control Pavilion Tower (Korean Traditional Giwa Roof Motif)
+    const tcPos = worldPosition(34.7346, 126.4112);
+    const tcY = surfaceHeight(34.7346, 126.4112) + 0.05;
+    const tower = new THREE.Group();
+    tower.position.set(tcPos.x, tcY, tcPos.z);
+
+    const towerBase = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.35, 1.1), concreteMat);
+    towerBase.position.y = 0.175;
+    tower.add(towerBase);
+    const towerShaft = new THREE.Mesh(new THREE.BoxGeometry(0.74, 1.55, 0.74), concreteMat);
+    towerShaft.position.y = 1.05;
+    towerShaft.castShadow = true;
+    tower.add(towerShaft);
+    const towerObs = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.38, 1.06), glassMat);
+    towerObs.position.y = 1.98;
+    tower.add(towerObs);
+    const giwaMat = new THREE.MeshStandardMaterial({ color: 0x262f3d, roughness: 0.58, metalness: 0.22 });
+    const giwaEaves = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.12, 1.52), giwaMat);
+    giwaEaves.position.y = 2.22;
+    giwaEaves.castShadow = true;
+    tower.add(giwaEaves);
+    const giwaRoof = new THREE.Mesh(new THREE.ConeGeometry(1.12, 0.52, 4), giwaMat);
+    giwaRoof.position.y = 2.52;
+    giwaRoof.rotation.y = Math.PI / 4;
+    giwaRoof.castShadow = true;
+    tower.add(giwaRoof);
+    yeongamCircuitGroup.add(tower);
+
+    // 6. Marina Curve Grandstand + Samho Yacht Lagoon Pier & Sailboats
+    const marStandPos = worldPosition(34.7294, 126.4232);
+    const marStand = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.52, 0.78), roofCanopyMat);
+    marStand.position.set(marStandPos.x, surfaceHeight(34.7294, 126.4232) + 0.28, marStandPos.z);
+    marStand.rotation.y = 0.65;
+    marStand.castShadow = true;
+    yeongamCircuitGroup.add(marStand);
+
+    const pierPos = worldPosition(34.7270, 126.4158);
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0x9c6b49, roughness: 0.76, metalness: 0.05 });
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 3.2), woodMat);
+    pier.position.set(pierPos.x, -1.35, pierPos.z);
+    yeongamCircuitGroup.add(pier);
+
+    const hullMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35, metalness: 0.1 });
+    const sailMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, side: THREE.DoubleSide });
+    [
+      [34.7252, 126.4145, 0.3],
+      [34.7256, 126.4172, -0.4],
+      [34.7244, 126.4192, 0.8],
+      [34.7250, 126.4126, -0.2]
+    ].forEach(([yLat, yLng, rotY]) => {
+      const yp = worldPosition(yLat, yLng);
+      const boat = new THREE.Group();
+      boat.position.set(yp.x, -1.42, yp.z);
+      boat.rotation.y = rotY;
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.78), hullMat);
+      boat.add(hull);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.95, 6), steelMat);
+      mast.position.y = 0.52;
+      boat.add(mast);
+      const sail = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.76, 3), sailMat);
+      sail.position.set(0, 0.54, 0.05);
+      sail.scale.set(0.15, 1, 1);
+      boat.add(sail);
+      yeongamCircuitGroup.add(boat);
+    });
+
+    // 7. 4 Animated GT / Formula Sports Cars racing continuously on KIC circuit
+    const carConfigs = [
+      { color: 0xdc2626, phase: 0.03, speed: 0.031 }, // Racing Red
+      { color: 0x2563eb, phase: 0.18, speed: 0.029 }, // Works Blue
+      { color: 0xf59e0b, phase: 0.43, speed: 0.033 }, // GT Amber Gold
+      { color: 0x10b981, phase: 0.71, speed: 0.028 }  // Team Emerald
+    ];
+
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.85, metalness: 0.05 });
+    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.18, metalness: 0.65 });
+    const headLightMat = new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfef08a, emissiveIntensity: 1.1 });
+    const tailLightMat = new THREE.MeshStandardMaterial({ color: 0xff2b2b, emissive: 0xdc2626, emissiveIntensity: 1.1 });
+
+    carConfigs.forEach((cfg) => {
+      const car = new THREE.Group();
+      const bodyMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.28, metalness: 0.42 });
+
+      const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.15, 1.08), bodyMat);
+      chassis.position.y = 0.11;
+      chassis.castShadow = true;
+      car.add(chassis);
+
+      const canopyGlass = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.13, 0.46), cabinMat);
+      canopyGlass.position.set(0, 0.21, -0.02);
+      car.add(canopyGlass);
+
+      const rearWing = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.04, 0.14), tireMat);
+      rearWing.position.set(0, 0.27, -0.46);
+      car.add(rearWing);
+
+      const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.05, 0.04), headLightMat);
+      headlight.position.set(0, 0.12, 0.54);
+      car.add(headlight);
+
+      const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.04), tailLightMat);
+      taillight.position.set(0, 0.13, -0.54);
+      car.add(taillight);
+
+      const wheelGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.08, 8);
+      wheelGeo.rotateZ(Math.PI / 2);
+      [
+        [-0.24, 0.08, 0.34],
+        [0.24, 0.08, 0.34],
+        [-0.24, 0.08, -0.34],
+        [0.24, 0.08, -0.34]
+      ].forEach(([wx, wy, wz]) => {
+        const wheel = new THREE.Mesh(wheelGeo, tireMat);
+        wheel.position.set(wx, wy, wz);
+        car.add(wheel);
+      });
+
+      yeongamTrackCurve.getPointAt(cfg.phase, _carPos);
+      yeongamTrackCurve.getPointAt((cfg.phase + 0.01) % 1, _carNextPos);
+      car.position.copy(_carPos);
+      car.position.y += 0.06;
+      car.lookAt(_carNextPos.x, _carNextPos.y + 0.06, _carNextPos.z);
+
+      yeongamCircuitGroup.add(car);
+      yeongamAnimCars.push({ mesh: car, phase: cfg.phase, speed: cfg.speed });
+    });
+
+    scene.add(yeongamCircuitGroup);
+  }
+
   function buildNightSkyStars() {
     if (starsPoints) disposeObject(starsPoints);
 
@@ -3417,6 +4462,710 @@
 
     elevationPointerMesh.visible = false;
     scene.add(elevationPointerMesh);
+
+    if (elevationTransectGroup) disposeObject(elevationTransectGroup);
+    elevationTransectGroup = new THREE.Group();
+    elevationTransectGroup.name = 'elevation-transect-overlay';
+    elevationTransectGroup.renderOrder = 2;
+    elevationTransectGroup.visible = false;
+    scene.add(elevationTransectGroup);
+
+    if (verticalSliceCutGroup) disposeObject(verticalSliceCutGroup);
+    verticalSliceCutGroup = new THREE.Group();
+    verticalSliceCutGroup.name = 'vertical-slice-cutaway';
+    verticalSliceCutGroup.renderOrder = 3;
+    verticalSliceCutGroup.visible = false;
+    scene.add(verticalSliceCutGroup);
+  }
+
+  function applyMaterialSliceState(mat, clippingPlanes, translucentOpacity) {
+    if (!mat) return;
+    if (Array.isArray(mat)) {
+      for (let i = 0; i < mat.length; i++) {
+        applyMaterialSliceState(mat[i], clippingPlanes, translucentOpacity);
+      }
+      return;
+    }
+    if (!mat.userData) mat.userData = {};
+    if (!mat.userData.__origSlice) {
+      mat.userData.__origSlice = {
+        transparent: Boolean(mat.transparent),
+        opacity: Number.isFinite(mat.opacity) ? mat.opacity : 1,
+        depthWrite: mat.depthWrite !== false
+      };
+    }
+    const orig = mat.userData.__origSlice;
+    const prevTrans = Boolean(mat.transparent);
+
+    if (Array.isArray(clippingPlanes) && clippingPlanes.length > 0) {
+      mat.clippingPlanes = clippingPlanes;
+      mat.clipShadows = true;
+      mat.transparent = orig.transparent;
+      mat.opacity = orig.opacity;
+      mat.depthWrite = orig.depthWrite;
+    } else if (Number.isFinite(translucentOpacity)) {
+      mat.clippingPlanes = [];
+      mat.clipShadows = false;
+      mat.transparent = true;
+      mat.opacity = translucentOpacity;
+      mat.depthWrite = false;
+    } else {
+      mat.clippingPlanes = [];
+      mat.clipShadows = false;
+      mat.transparent = orig.transparent;
+      mat.opacity = orig.opacity;
+      mat.depthWrite = orig.depthWrite;
+    }
+
+    if (prevTrans !== Boolean(mat.transparent)) {
+      mat.needsUpdate = true;
+    }
+  }
+
+  function updateActiveSlicePlaneForCamera() {
+    if (!activeSlicePlane || !activeSlicePlaneParams || !camera) return;
+    const { midX, midZ, normalX, normalZ } = activeSlicePlaneParams;
+    const camDot = (camera.position.x - midX) * normalX + (camera.position.z - midZ) * normalZ;
+    const sign = camDot > 0 ? -1 : 1;
+    _sliceNormalVec.set(normalX * sign, 0, normalZ * sign).normalize();
+    _sliceAnchorVec.set(midX, 0, midZ);
+    activeSlicePlane.setFromNormalAndCoplanarPoint(_sliceNormalVec, _sliceAnchorVec);
+  }
+
+  function restoreTerrainFromVerticalSlice() {
+    activeSlicePlane = null;
+    activeSlicePlaneParams = null;
+    if (terrain) applyMaterialSliceState(terrain.material, [], null);
+    if (baseMesh) applyMaterialSliceState(baseMesh.material, [], null);
+    if (ocean) applyMaterialSliceState(ocean.material, [], null);
+    if (oceanRim) applyMaterialSliceState(oceanRim.material, [], null);
+    if (shoreline) applyMaterialSliceState(shoreline.material, [], null);
+    if (roadGroup) {
+      roadGroup.traverse((child) => {
+        if (child.isMesh && child.material) applyMaterialSliceState(child.material, [], null);
+      });
+    }
+    if (verticalSliceCutGroup) {
+      while (verticalSliceCutGroup.children.length > 0) {
+        disposeObject(verticalSliceCutGroup.children[0]);
+      }
+      verticalSliceCutGroup.visible = false;
+    }
+  }
+
+  function clear3DTransectOverlay() {
+    activeTransectSamples = [];
+    activeTransectHoverRefs = null;
+    restoreTerrainFromVerticalSlice();
+    if (!elevationTransectGroup) return;
+    while (elevationTransectGroup.children.length > 0) {
+      disposeObject(elevationTransectGroup.children[0]);
+    }
+    elevationTransectGroup.visible = false;
+  }
+
+  function build3DTransectEndpointPin(sample, colorHex, heightUnits) {
+    const pin = new THREE.Group();
+    const surfY = surfaceHeight(sample.lat, sample.lng);
+    pin.position.set(sample.x, surfY, sample.z);
+
+    const ringGeo = new THREE.RingGeometry(0.65, 1.05, 24);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.92
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.y = 0.24;
+    pin.add(ring);
+
+    const h = heightUnits || 3.8;
+    const stemGeo = new THREE.CylinderGeometry(0.11, 0.16, h, 10);
+    stemGeo.translate(0, h * 0.5 + 0.16, 0);
+    const stemMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.9
+    });
+    pin.add(new THREE.Mesh(stemGeo, stemMat));
+
+    const headGeo = new THREE.SphereGeometry(0.42, 14, 12);
+    const headMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = h + 0.22;
+    pin.add(head);
+
+    return pin;
+  }
+
+  function build3DTransectOverlay(samples, metrics) {
+    if (!scene || !elevationTransectGroup) return;
+    while (elevationTransectGroup.children.length > 0) {
+      disposeObject(elevationTransectGroup.children[0]);
+    }
+    if (!Array.isArray(samples) || samples.length < 2) {
+      elevationTransectGroup.visible = false;
+      return;
+    }
+
+    const r = getRegion();
+    const maxElevM = Math.max(1, metrics ? metrics.maxElevM : 100);
+    const ribbonHalfWidth = Math.max(0.28, Math.min(0.62, r.mapWidth * 0.0028));
+    const profileLiftHeight = Math.max(3.6, Math.min(7.2, r.mapWidth * 0.032));
+
+    // 1. Elevated 3D Holographic Cross-Section Wall rising above the terrain surface
+    //    plus a crisp ground-hugging contour ribbon & glowing skyline crest ribbon
+    const curtainPositions = new Float32Array(samples.length * 2 * 3);
+    const curtainColors = new Float32Array(samples.length * 2 * 3);
+    const curtainIndices = [];
+
+    const groundPositions = [];
+    const groundColors = [];
+    const groundIndices = [];
+
+    const crestPositions = [];
+    const crestColors = [];
+    const crestIndices = [];
+
+    const baseYs = samples.map((s) => surfaceHeight(s.lat, s.lng) + 0.18);
+    const topYs = samples.map((s, idx) => {
+      const ratio = Math.max(0, Math.min(1, s.elevationM / maxElevM));
+      return baseYs[idx] + 0.45 + ratio * profileLiftHeight;
+    });
+
+    for (let i = 0; i < samples.length; i++) {
+      const s = samples[i];
+      const baseY = baseYs[i];
+      const topY = topYs[i];
+      const elevRatio = Math.max(0, Math.min(1, s.elevationM / maxElevM));
+
+      // Color gradient: cyan (#38bdf8) -> emerald (#34d399) -> peak gold (#fbbf24)
+      const topR = Math.min(1, elevRatio < 0.55 ? 0.12 + elevRatio * 0.25 : 0.26 + (elevRatio - 0.55) * 1.65);
+      const topG = Math.min(1, elevRatio < 0.55 ? 0.74 + elevRatio * 0.25 : 0.88 - (elevRatio - 0.55) * 0.22);
+      const topB = Math.max(0.05, Math.min(1, elevRatio < 0.55 ? 0.98 - elevRatio * 0.45 : 0.72 - (elevRatio - 0.55) * 1.3));
+
+      const vTop = i * 2;
+      const vBot = i * 2 + 1;
+      curtainPositions[vTop * 3] = s.x;
+      curtainPositions[vTop * 3 + 1] = topY;
+      curtainPositions[vTop * 3 + 2] = s.z;
+      curtainPositions[vBot * 3] = s.x;
+      curtainPositions[vBot * 3 + 1] = baseY;
+      curtainPositions[vBot * 3 + 2] = s.z;
+
+      curtainColors[vTop * 3] = topR;
+      curtainColors[vTop * 3 + 1] = topG;
+      curtainColors[vTop * 3 + 2] = topB;
+      curtainColors[vBot * 3] = 0.04;
+      curtainColors[vBot * 3 + 1] = 0.52;
+      curtainColors[vBot * 3 + 2] = 0.88;
+
+      if (i < samples.length - 1) {
+        const nTop = (i + 1) * 2;
+        const nBot = (i + 1) * 2 + 1;
+        curtainIndices.push(vTop, vBot, nTop, vBot, nBot, nTop);
+
+        const next = samples[i + 1];
+        const nextBaseY = baseYs[i + 1];
+        const nextTopY = topYs[i + 1];
+        const dx = next.x - s.x;
+        const dz = next.z - s.z;
+        const len = Math.hypot(dx, dz);
+        if (len > 1e-5) {
+          const ox = (-dz / len) * ribbonHalfWidth;
+          const oz = (dx / len) * ribbonHalfWidth;
+          const baseV = groundPositions.length / 3;
+          groundPositions.push(
+            s.x + ox, baseY + 0.04, s.z + oz,
+            s.x - ox, baseY + 0.04, s.z - oz,
+            next.x + ox, nextBaseY + 0.04, next.z + oz,
+            next.x - ox, nextBaseY + 0.04, next.z - oz
+          );
+          for (let k = 0; k < 4; k++) {
+            groundColors.push(0.05, 0.72, 0.96);
+          }
+          groundIndices.push(baseV, baseV + 1, baseV + 2, baseV + 1, baseV + 3, baseV + 2);
+
+          const crestHalf = ribbonHalfWidth * 0.65;
+          const cox = (-dz / len) * crestHalf;
+          const coz = (dx / len) * crestHalf;
+          const cV = crestPositions.length / 3;
+          crestPositions.push(
+            s.x + cox, topY, s.z + coz,
+            s.x - cox, topY, s.z - coz,
+            next.x + cox, nextTopY, next.z + coz,
+            next.x - cox, nextTopY, next.z - coz
+          );
+          for (let k = 0; k < 4; k++) {
+            crestColors.push(topR, topG, topB);
+          }
+          crestIndices.push(cV, cV + 1, cV + 2, cV + 1, cV + 3, cV + 2);
+        }
+      }
+    }
+
+    const curtainGeo = new THREE.BufferGeometry();
+    curtainGeo.setAttribute('position', new THREE.BufferAttribute(curtainPositions, 3));
+    curtainGeo.setAttribute('color', new THREE.BufferAttribute(curtainColors, 3));
+    curtainGeo.setIndex(curtainIndices);
+    const curtainMat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.42,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const curtainMesh = new THREE.Mesh(curtainGeo, curtainMat);
+    curtainMesh.renderOrder = 2;
+    elevationTransectGroup.add(curtainMesh);
+
+    if (groundPositions.length > 0) {
+      const groundGeo = new THREE.BufferGeometry();
+      groundGeo.setAttribute('position', new THREE.Float32BufferAttribute(groundPositions, 3));
+      groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(groundColors, 3));
+      groundGeo.setIndex(groundIndices);
+      const groundMat = new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2
+      });
+      const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+      groundMesh.renderOrder = 3;
+      elevationTransectGroup.add(groundMesh);
+    }
+
+    if (crestPositions.length > 0) {
+      const crestGeo = new THREE.BufferGeometry();
+      crestGeo.setAttribute('position', new THREE.Float32BufferAttribute(crestPositions, 3));
+      crestGeo.setAttribute('color', new THREE.Float32BufferAttribute(crestColors, 3));
+      crestGeo.setIndex(crestIndices);
+      const crestMat = new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        side: THREE.DoubleSide
+      });
+      const crestMesh = new THREE.Mesh(crestGeo, crestMat);
+      crestMesh.renderOrder = 4;
+      elevationTransectGroup.add(crestMesh);
+    }
+
+    // 3. Start (A), End (B), and Peak (MAX) Beacons reaching crest elevation
+    elevationTransectGroup.add(build3DTransectEndpointPin(samples[0], 0x10b981, 3.6));
+    elevationTransectGroup.add(build3DTransectEndpointPin(samples[samples.length - 1], 0x0ea5e9, 3.6));
+    if (metrics && metrics.peakSample && metrics.peakIndex > 1 && metrics.peakIndex < samples.length - 2 && metrics.maxElevM > 15) {
+      elevationTransectGroup.add(build3DTransectEndpointPin(metrics.peakSample, 0xf59e0b, profileLiftHeight + 1.2));
+    }
+
+    elevationTransectGroup.visible = true;
+  }
+
+  function applyVerticalSlice3DCut(samples, metrics) {
+    const helpers = window.TransectHelpers;
+    if (!scene || !verticalSliceCutGroup || !helpers || !state.elevationProfileOpen || !state.verticalSliceMode || !Array.isArray(samples) || samples.length < 2) {
+      restoreTerrainFromVerticalSlice();
+      return;
+    }
+
+    while (verticalSliceCutGroup.children.length > 0) {
+      disposeObject(verticalSliceCutGroup.children[0]);
+    }
+
+    const r = getRegion();
+    const isCollinear = helpers.isPathCollinear(samples, 0.055);
+    const halfWidth = isCollinear
+      ? Math.max(0.45, Math.min(0.85, r.mapWidth * 0.0045))
+      : Math.max(0.95, Math.min(1.65, r.mapWidth * 0.0085));
+    const bedrockY = -4.2;
+
+    const sliceData = helpers.buildVerticalSliceGeometryData(samples, {
+      mode: 'world',
+      halfWidth,
+      bedrockY,
+      maxElevM: Math.max(80, metrics ? metrics.maxElevM : 500),
+      getSurfaceY: (s) => surfaceHeight(s.lat, s.lng) + 0.08
+    });
+
+    if (sliceData.indices.length > 0) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(sliceData.positions, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(sliceData.colors, 3));
+      geo.setIndex(sliceData.indices);
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.78,
+        metalness: 0.06,
+        side: THREE.DoubleSide
+      });
+      const sliceMesh = new THREE.Mesh(geo, mat);
+      sliceMesh.castShadow = true;
+      sliceMesh.receiveShadow = true;
+      verticalSliceCutGroup.add(sliceMesh);
+
+      // Glowing 0m sea-level contour border along front & back of the geological block
+      const spineLen = samples.length;
+      const seaPtsFront = [];
+      const seaPtsBack = [];
+      const nVec = { x: 0, z: 1 };
+      for (let i = 0; i < spineLen; i++) {
+        const s = samples[i];
+        const prev = samples[Math.max(0, i - 1)];
+        const next = samples[Math.min(spineLen - 1, i + 1)];
+        const dx = next.x - prev.x;
+        const dz = next.z - prev.z;
+        const len = Math.hypot(dx, dz) || 1;
+        nVec.x = -dz / len;
+        nVec.z = dx / len;
+        seaPtsFront.push(new THREE.Vector3(s.x + nVec.x * (halfWidth + 0.04), 0.06, s.z + nVec.z * (halfWidth + 0.04)));
+        seaPtsBack.push(new THREE.Vector3(s.x - nVec.x * (halfWidth + 0.04), 0.06, s.z - nVec.z * (halfWidth + 0.04)));
+      }
+      const seaLineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.92 });
+      verticalSliceCutGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(seaPtsFront), seaLineMat));
+      verticalSliceCutGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(seaPtsBack), seaLineMat));
+    }
+
+    if (isCollinear) {
+      activeSlicePlaneParams = helpers.computeSliceCutPlaneParams(samples);
+      if (activeSlicePlaneParams) {
+        if (!activeSlicePlane) activeSlicePlane = new THREE.Plane();
+        updateActiveSlicePlaneForCamera();
+        const planes = [activeSlicePlane];
+        if (terrain) applyMaterialSliceState(terrain.material, planes, null);
+        if (baseMesh) applyMaterialSliceState(baseMesh.material, planes, null);
+        if (ocean) applyMaterialSliceState(ocean.material, planes, null);
+        if (oceanRim) applyMaterialSliceState(oceanRim.material, planes, null);
+        if (shoreline) applyMaterialSliceState(shoreline.material, planes, null);
+        if (roadGroup) {
+          roadGroup.traverse((child) => {
+            if (child.isMesh && child.material) applyMaterialSliceState(child.material, planes, null);
+          });
+        }
+      }
+    } else {
+      activeSlicePlane = null;
+      activeSlicePlaneParams = null;
+      if (terrain) applyMaterialSliceState(terrain.material, [], 0.28);
+      if (baseMesh) applyMaterialSliceState(baseMesh.material, [], 0.22);
+      if (ocean) applyMaterialSliceState(ocean.material, [], 0.26);
+      if (oceanRim) applyMaterialSliceState(oceanRim.material, [], 0.26);
+      if (shoreline) applyMaterialSliceState(shoreline.material, [], 0.45);
+      if (roadGroup) {
+        roadGroup.traverse((child) => {
+          if (child.isMesh && child.material) applyMaterialSliceState(child.material, [], 0.40);
+        });
+      }
+    }
+
+    verticalSliceCutGroup.visible = true;
+  }
+
+  function detectSoftwareWebGLContext() {
+    if (!renderer) return false;
+    try {
+      const gl = renderer.getContext();
+      if (!gl) return false;
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      if (dbg) {
+        const str = String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '');
+        return /swiftshader|llvmpipe|softpipe/i.test(str);
+      }
+    } catch (_) {
+      return false;
+    }
+    return false;
+  }
+
+  function ensureSlicePanelRenderer() {
+    const canvas = $('#elev-slice-webgl');
+    if (!canvas || !window.THREE) return null;
+    if (!sliceRenderer) {
+      const isSw = detectSoftwareWebGLContext();
+      sliceRenderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: !isSw });
+      sliceRenderer.setPixelRatio(isSw ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+      sliceRenderer.setClearColor(0x000000, 0);
+      sliceRenderer.outputEncoding = THREE.sRGBEncoding;
+
+      sliceScene = new THREE.Scene();
+      sliceCamera = new THREE.PerspectiveCamera(20, 4, 0.5, 600);
+
+      const hemi = new THREE.HemisphereLight(0xe0f2fe, 0x1e293b, 0.95);
+      sliceScene.add(hemi);
+      const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.15);
+      keyLight.position.set(45, 70, 85);
+      sliceScene.add(keyLight);
+      const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.38);
+      rimLight.position.set(-55, 25, -45);
+      sliceScene.add(rimLight);
+
+      sliceBlockGroup = new THREE.Group();
+      sliceScene.add(sliceBlockGroup);
+
+      sliceCursorMesh = new THREE.Group();
+      sliceCursorMesh.visible = false;
+      sliceScene.add(sliceCursorMesh);
+    }
+    return sliceRenderer;
+  }
+
+  function projectSlicePointToSvg(x3d, y3d, z3d, width, height) {
+    if (!sliceCamera) return { x: width * 0.5, y: height * 0.5 };
+    const v = new THREE.Vector3(x3d, y3d, z3d).project(sliceCamera);
+    return {
+      x: (v.x * 0.5 + 0.5) * width,
+      y: (-v.y * 0.5 + 0.5) * height
+    };
+  }
+
+  function renderVerticalSlicePanel(samples, metrics, width, height) {
+    const helpers = window.TransectHelpers;
+    const sr = ensureSlicePanelRenderer();
+    if (!sr || !sliceScene || !sliceCamera || !sliceBlockGroup || !helpers || !Array.isArray(samples) || samples.length < 2) {
+      slicePanelProjection = null;
+      return null;
+    }
+
+    const w = Math.max(120, Math.round(width || 740));
+    const h = Math.max(90, Math.round(height || 196));
+    sr.setSize(w, h, false);
+
+    while (sliceBlockGroup.children.length > 0) {
+      disposeObject(sliceBlockGroup.children[0]);
+    }
+    while (sliceCursorMesh.children.length > 0) {
+      disposeObject(sliceCursorMesh.children[0]);
+    }
+    sliceCursorMesh.visible = false;
+
+    const panelSpanX = 96;
+    const halfWidth = 7.2;
+    const panelBedrockM = -520;
+    const panelTopM = Math.max(220, (metrics ? metrics.maxElevM : 200) * 1.24);
+    const totalRangeM = panelTopM - panelBedrockM;
+    const worldHeightSpan = 28;
+    const worldPerMeter = worldHeightSpan / totalRangeM;
+    const bedrockY = panelBedrockM * worldPerMeter;
+    const topYMax = panelTopM * worldPerMeter;
+    const panelTopScale = topYMax;
+    const panelSeaY = 0;
+
+    const geomData = helpers.buildVerticalSliceGeometryData(samples, {
+      mode: 'panel',
+      panelSpanX,
+      halfWidth,
+      bedrockY,
+      panelSeaY,
+      maxElevM: panelTopM,
+      panelTopScale
+    });
+
+    if (geomData.indices.length > 0) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(geomData.positions, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(geomData.colors, 3));
+      geo.setIndex(geomData.indices);
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.72,
+        metalness: 0.08,
+        side: THREE.DoubleSide
+      });
+      sliceBlockGroup.add(new THREE.Mesh(geo, mat));
+
+      // Subtle wireframe geological strata guide lines along front cut face
+      const strataFracs = [0.08, 0.28, 0.64];
+      const totalDistKm = Math.max(0.05, samples[samples.length - 1].distanceKm || 1);
+      strataFracs.forEach((f, idx) => {
+        const pts = [];
+        for (let i = 0; i < samples.length; i++) {
+          const s = samples[i];
+          const x = ((s.distanceKm / totalDistKm) - 0.5) * panelSpanX;
+          const surfY = Math.max(0, s.elevationM) * worldPerMeter;
+          const y = surfY - f * Math.max(0.4, surfY - bedrockY);
+          pts.push(new THREE.Vector3(x, y, halfWidth + 0.08));
+        }
+        const lineMat = new THREE.LineBasicMaterial({
+          color: idx === 0 ? 0x4ade80 : (idx === 1 ? 0xf59e0b : 0x94a3b8),
+          transparent: true,
+          opacity: 0.55
+        });
+        sliceBlockGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+      });
+
+      // Translucent 0m sea-level water volume datum slab wrapping the cut section
+      const waterThick = Math.max(0.28, Math.abs(bedrockY) * 0.08);
+      const seaSlabGeo = new THREE.BoxGeometry(panelSpanX + 0.3, waterThick, halfWidth * 2 + 0.25);
+      const seaSlabMat = new THREE.MeshStandardMaterial({
+        color: 0x0ea5e9,
+        transparent: true,
+        opacity: 0.22,
+        roughness: 0.25,
+        metalness: 0.1,
+        depthWrite: false
+      });
+      const seaSlab = new THREE.Mesh(seaSlabGeo, seaSlabMat);
+      seaSlab.position.set(0, -waterThick * 0.5, 0);
+      sliceBlockGroup.add(seaSlab);
+
+      // Cursor highlight vertical slice frame (moved on hover)
+      const cursorH = topYMax - bedrockY + 2;
+      const cursorGeo = new THREE.PlaneGeometry(halfWidth * 2 + 0.5, cursorH);
+      cursorGeo.rotateY(Math.PI / 2);
+      const cursorMat = new THREE.MeshBasicMaterial({
+        color: 0x00f5ff,
+        transparent: true,
+        opacity: 0.26,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      const cursorPlane = new THREE.Mesh(cursorGeo, cursorMat);
+      cursorPlane.position.y = (topYMax + bedrockY) * 0.5;
+      sliceCursorMesh.add(cursorPlane);
+    }
+
+    // Calibrate perspective camera so front strata wall aligns cleanly inside SVG chart margins
+    const margin = { top: 18, right: 34, bottom: 26, left: 54 };
+    const availW = Math.max(80, w - margin.left - margin.right);
+    const availH = Math.max(50, h - margin.top - margin.bottom);
+    const aspect = w / h;
+    const fovRad = THREE.MathUtils.degToRad(20);
+    const tanHalf = Math.tan(fovRad * 0.5);
+
+    const dVert = (worldHeightSpan * 1.24) / (2 * tanHalf * (availH / h));
+    const dHoriz = (panelSpanX * 1.14) / (2 * tanHalf * aspect * (availW / w));
+    const camDist = Math.max(dVert, dHoriz);
+
+    const midWorldY = (bedrockY + topYMax) * 0.5;
+    sliceCamera.aspect = aspect;
+    sliceCamera.position.set(11.5, midWorldY + camDist * 0.105, camDist);
+    sliceCamera.lookAt(1.8, midWorldY + 0.85, 0);
+    sliceCamera.updateProjectionMatrix();
+    sliceCamera.updateMatrixWorld();
+
+    sr.render(sliceScene, sliceCamera);
+
+    const totalDistKm = Math.max(0.05, samples[samples.length - 1].distanceKm || 1);
+    const projectElevDist = (distKm, elevM) => {
+      const x3d = ((distKm / totalDistKm) - 0.5) * panelSpanX;
+      const y3d = elevM * worldPerMeter;
+      return projectSlicePointToSvg(x3d, y3d, halfWidth, w, h);
+    };
+
+    slicePanelProjection = {
+      width: w,
+      height: h,
+      panelSpanX,
+      halfWidth,
+      panelBedrockM,
+      panelTopM,
+      worldPerMeter,
+      totalDistKm,
+      bedrockY,
+      topYMax,
+      projectElevDist
+    };
+    return slicePanelProjection;
+  }
+
+  function updateVerticalSlicePanelCursor(sample) {
+    if (!sliceRenderer || !sliceScene || !sliceCamera || !sliceCursorMesh || !slicePanelProjection) return;
+    if (!sample || !state.verticalSliceMode || !state.elevationProfileOpen) {
+      if (sliceCursorMesh.visible) {
+        sliceCursorMesh.visible = false;
+        sliceRenderer.render(sliceScene, sliceCamera);
+      }
+      return;
+    }
+    const { panelSpanX, totalDistKm } = slicePanelProjection;
+    const x3d = ((Math.max(0, Math.min(totalDistKm, sample.distanceKm)) / totalDistKm) - 0.5) * panelSpanX;
+    sliceCursorMesh.position.set(x3d, 0, 0);
+    sliceCursorMesh.visible = true;
+    sliceRenderer.render(sliceScene, sliceCamera);
+  }
+
+  function syncElevationFocusSample(sample, source) {
+    const liveBadge = $('#transect-live-badge');
+    const liveElev = $('#transect-live-elev');
+    const liveMeta = $('#transect-live-meta');
+    const liveLabel = $('#transect-live-label');
+
+    if (!sample) {
+      if (elevationPointerMesh) elevationPointerMesh.visible = false;
+      if (liveBadge) liveBadge.hidden = true;
+      updateVerticalSlicePanelCursor(null);
+      if (source !== 'chart' && activeTransectHoverRefs) {
+        activeTransectHoverRefs.hoverLine.style('opacity', 0);
+        activeTransectHoverRefs.hoverCircle.style('opacity', 0);
+        activeTransectHoverRefs.tooltip.attr('hidden', true).style('display', 'none');
+      }
+      return;
+    }
+
+    if (elevationPointerMesh) {
+      const surfY = surfaceHeight(sample.lat, sample.lng);
+      elevationPointerMesh.position.set(sample.x, surfY, sample.z);
+      elevationPointerMesh.visible = true;
+    }
+
+    updateVerticalSlicePanelCursor(sample);
+
+    // Compute local slope near this sample for HUD readout
+    let localSlopePct = 0;
+    const idx = Math.max(0, Math.min(activeTransectSamples.length - 1, sample.index || 0));
+    if (activeTransectSamples.length >= 2) {
+      const prev = activeTransectSamples[Math.max(0, idx - 1)];
+      const next = activeTransectSamples[Math.min(activeTransectSamples.length - 1, idx + 1)];
+      const dKm = Math.max(0, (next.distanceKm || 0) - (prev.distanceKm || 0));
+      if (dKm > 0.005) {
+        localSlopePct = Math.min(75, (Math.abs((next.elevationM || 0) - (prev.elevationM || 0)) / (dKm * 1000)) * 100);
+      }
+    }
+
+    const strata = window.TransectHelpers && state.verticalSliceMode
+      ? window.TransectHelpers.getStrataInfo(20, sample.elevationM)
+      : null;
+
+    if (liveBadge && liveElev && liveMeta) {
+      liveBadge.hidden = false;
+      if (liveLabel) {
+        liveLabel.textContent = isDraggingTransect
+          ? 'LIVE DRAG SLICE'
+          : (state.verticalSliceMode ? 'VERTICAL SLICE' : 'LIVE PROFILE');
+      }
+      liveElev.textContent = `${Math.round(sample.elevationM)} m`;
+      liveMeta.textContent = `거리 ${sample.distanceKm.toFixed(1)} km · 경사 ${localSlopePct.toFixed(1)}%${strata ? ' · ' + strata.label.split(' ')[0] : (sample.name ? ' · ' + sample.name : '')}`;
+    }
+
+    if (source !== 'chart' && activeTransectHoverRefs) {
+      const refs = activeTransectHoverRefs;
+      const cx = refs.getCx ? refs.getCx(sample) : refs.xScale(sample.distanceKm);
+      const cy = refs.getCy ? refs.getCy(sample) : refs.yScale(sample.elevationM);
+      const clampedX = Math.max(refs.margin.left + 84, Math.min(refs.width - 88, (refs.absCoords ? 0 : refs.margin.left) + cx));
+      const tipTop = cy < 58 ? (refs.absCoords ? 0 : refs.margin.top) + cy + 14 : Math.max(4, (refs.absCoords ? 0 : refs.margin.top) + cy - 64);
+      if (refs.hoverLine) {
+        const yBot = refs.getYBot ? refs.getYBot(sample) : refs.chartHeight;
+        refs.hoverLine.attr('x1', cx).attr('x2', cx).attr('y1', Math.max(6, cy - 16)).attr('y2', yBot).style('opacity', 1);
+      }
+      if (refs.hoverCircle) refs.hoverCircle.attr('cx', cx).attr('cy', cy).style('opacity', 1);
+      refs.tooltip
+        .attr('hidden', null)
+        .style('display', 'block')
+        .style('left', `${clampedX}px`)
+        .style('top', `${tipTop}px`)
+        .html(`
+          <strong>${sample.name ? sample.name + ' · ' : ''}${sample.distanceKm.toFixed(1)} km</strong>
+          <div>고도 <span style="color:#38bdf8; font-weight:700;">${Math.round(sample.elevationM)} m</span> · 경사 ${localSlopePct.toFixed(1)}%</div>
+          ${strata ? `<div style="color:${strata.hex}; font-size:10px; font-weight:600;">표층 지질: ${strata.label}</div>` : ''}
+          <small style="color:#94a3b8;">위도 ${sample.lat.toFixed(4)}, 경도 ${sample.lng.toFixed(4)}</small>
+        `);
+    }
   }
 
   function calculateSolarPosition(latDeg, lngDeg, dateStr, minutesFromMidnight) {
@@ -3628,183 +5377,309 @@
         entry.mat.emissiveIntensity = THREE.MathUtils.lerp(entry.dayInt, entry.nightInt, duskFactor);
       }
     }
+    if (yeongamEmissiveMaterials && yeongamEmissiveMaterials.length > 0) {
+      const duskFactor = THREE.MathUtils.clamp((8 - elev) / 16, 0, 1);
+      for (let i = 0; i < yeongamEmissiveMaterials.length; i++) {
+        const entry = yeongamEmissiveMaterials[i];
+        entry.mat.emissiveIntensity = THREE.MathUtils.lerp(entry.dayInt, entry.nightInt, duskFactor);
+      }
+    }
   }
 
-  function updateElevationProfile() {
+  function updateElevationProfile(overrideWaypoints) {
     const r = getRegion();
-    const mode = state.elevationTransectMode || 'west-east';
-    const sampleCount = 120;
-    const samples = [];
+    const helpers = window.TransectHelpers;
+    const mode = Array.isArray(overrideWaypoints) ? 'custom-path' : (state.elevationTransectMode || 'west-east');
+    const sampleCount = isDraggingTransect ? 72 : 120;
 
-    function haversineKm(lat1, lon1, lat2, lon2) {
-      const R = 6371;
-      const dLat = THREE.MathUtils.degToRad(lat2 - lat1);
-      const dLon = THREE.MathUtils.degToRad(lon2 - lon1);
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(THREE.MathUtils.degToRad(lat1)) * Math.cos(THREE.MathUtils.degToRad(lat2)) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
-    }
-
-    let runningDist = 0;
-
-    if (mode === 'west-east') {
+    let waypoints = [];
+    if (Array.isArray(overrideWaypoints) && overrideWaypoints.length >= 2) {
+      waypoints = overrideWaypoints;
+    } else if (mode === 'west-east') {
       const midLat = (r.bounds.north + r.bounds.south) / 2;
-      for (let i = 0; i < sampleCount; i++) {
-        const t = i / (sampleCount - 1);
-        const lng = r.bounds.west + t * (r.bounds.east - r.bounds.west);
-        const lat = midLat;
-        const elev = Math.max(0, heightAt(lat, lng));
-        const pos = worldPosition(lat, lng);
-        if (i > 0) {
-          const prev = samples[i - 1];
-          runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
-        }
-        samples.push({
-          index: i,
-          lat,
-          lng,
-          x: pos.x,
-          z: pos.z,
-          distanceKm: runningDist,
-          elevationM: elev
-        });
-      }
+      waypoints = [
+        { lat: midLat, lng: r.bounds.west, name: '서단' },
+        { lat: midLat, lng: r.bounds.east, name: '동단' }
+      ];
     } else if (mode === 'north-south') {
       const midLng = (r.bounds.east + r.bounds.west) / 2;
-      for (let i = 0; i < sampleCount; i++) {
-        const t = i / (sampleCount - 1);
-        const lat = r.bounds.north - t * (r.bounds.north - r.bounds.south);
-        const lng = midLng;
-        const elev = Math.max(0, heightAt(lat, lng));
-        const pos = worldPosition(lat, lng);
-        if (i > 0) {
-          const prev = samples[i - 1];
-          runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
-        }
-        samples.push({
-          index: i,
-          lat,
-          lng,
-          x: pos.x,
-          z: pos.z,
-          distanceKm: runningDist,
-          elevationM: elev
-        });
+      waypoints = [
+        { lat: r.bounds.north, lng: midLng, name: '북단' },
+        { lat: r.bounds.south, lng: midLng, name: '남단' }
+      ];
+    } else if (mode === 'custom-path') {
+      waypoints = Array.isArray(state.customTransect) ? state.customTransect : [];
+    } else {
+      waypoints = state.markers.length >= 2 ? state.markers : r.presets.slice(0, 5);
+    }
+
+    const sampleElevM = (lat, lng) => Math.max(0, heightAt(lat, lng));
+    let samples = [];
+    if (waypoints.length >= 2 && helpers) {
+      samples = helpers.sampleTransectPath(waypoints, sampleElevM, {
+        sampleCount,
+        mapPoint: (lat, lng) => worldPosition(lat, lng)
+      });
+    } else if (mode !== 'custom-path' && helpers) {
+      const midLat = (r.bounds.north + r.bounds.south) / 2;
+      samples = helpers.sampleTransectPath(
+        [{ lat: midLat, lng: r.bounds.west }, { lat: midLat, lng: r.bounds.east }],
+        sampleElevM,
+        { sampleCount, mapPoint: (lat, lng) => worldPosition(lat, lng) }
+      );
+    }
+
+    activeTransectSamples = samples;
+    const metrics = helpers
+      ? helpers.computeTransectMetrics(samples)
+      : { minElevM: 0, maxElevM: 0, avgElevM: 0, peakIndex: 0, peakSample: null, totalDistKm: 0, maxSlopePct: 0, totalGainM: 0, totalLossM: 0 };
+
+    // Keep 3D viewport cross-section curtain & vertical slice cutaway synchronized
+    if (state.elevationProfileOpen || isDraggingTransect) {
+      build3DTransectOverlay(samples, metrics);
+      if (state.elevationProfileOpen && state.verticalSliceMode) {
+        applyVerticalSlice3DCut(samples, metrics);
+      } else {
+        restoreTerrainFromVerticalSlice();
       }
     } else {
-      const waypoints = state.markers.length >= 2 ? state.markers : r.presets.slice(0, 5);
-      if (waypoints.length >= 2) {
-        const segSamples = Math.floor(sampleCount / (waypoints.length - 1));
-        for (let seg = 0; seg < waypoints.length - 1; seg++) {
-          const p1 = waypoints[seg];
-          const p2 = waypoints[seg + 1];
-          for (let s = 0; s < segSamples; s++) {
-            const t = s / segSamples;
-            const lat = p1.lat + t * (p2.lat - p1.lat);
-            const lng = p1.lng + t * (p2.lng - p1.lng);
-            const elev = Math.max(0, heightAt(lat, lng));
-            const pos = worldPosition(lat, lng);
-            if (samples.length > 0) {
-              const prev = samples[samples.length - 1];
-              runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
-            }
-            samples.push({
-              index: samples.length,
-              lat,
-              lng,
-              x: pos.x,
-              z: pos.z,
-              distanceKm: runningDist,
-              elevationM: elev,
-              name: s === 0 ? p1.name : undefined
-            });
-          }
-        }
-        const lastP = waypoints[waypoints.length - 1];
-        const lastElev = Math.max(0, heightAt(lastP.lat, lastP.lng));
-        const lastPos = worldPosition(lastP.lat, lastP.lng);
-        runningDist += haversineKm(samples[samples.length - 1].lat, samples[samples.length - 1].lng, lastP.lat, lastP.lng);
-        samples.push({
-          index: samples.length,
-          lat: lastP.lat,
-          lng: lastP.lng,
-          x: lastPos.x,
-          z: lastPos.z,
-          distanceKm: runningDist,
-          elevationM: lastElev,
-          name: lastP.name
-        });
-      } else {
-        const midLat = (r.bounds.north + r.bounds.south) / 2;
-        for (let i = 0; i < sampleCount; i++) {
-          const t = i / (sampleCount - 1);
-          const lng = r.bounds.west + t * (r.bounds.east - r.bounds.west);
-          const lat = midLat;
-          const elev = Math.max(0, heightAt(lat, lng));
-          const pos = worldPosition(lat, lng);
-          if (i > 0) {
-            const prev = samples[i - 1];
-            runningDist += haversineKm(prev.lat, prev.lng, lat, lng);
-          }
-          samples.push({
-            index: i,
-            lat,
-            lng,
-            x: pos.x,
-            z: pos.z,
-            distanceKm: runningDist,
-            elevationM: elev
-          });
-        }
-      }
+      clear3DTransectOverlay();
     }
 
-    let minE = Infinity;
-    let maxE = -Infinity;
-    let sumE = 0;
-    let maxGrade = 0;
-
-    for (let i = 0; i < samples.length; i++) {
-      const e = samples[i].elevationM;
-      if (e < minE) minE = e;
-      if (e > maxE) maxE = e;
-      sumE += e;
-
-      if (i > 0) {
-        const dDistM = (samples[i].distanceKm - samples[i - 1].distanceKm) * 1000;
-        const dElevM = Math.abs(e - samples[i - 1].elevationM);
-        if (dDistM > 10) {
-          const grade = (dElevM / dDistM) * 100;
-          if (grade > maxGrade) maxGrade = Math.min(65, grade);
-        }
-      }
+    const titleEl = $('#elev-chart-title');
+    if (titleEl) {
+      const modeTitle =
+        mode === 'custom-path' ? '사용자 드래그 지형 단면' :
+        mode === 'north-south' ? '북 ↔ 남 지형 단면' :
+        mode === 'places-route' ? '장소 연결 경로 단면' : '서 ↔ 동 지형 단면';
+      const sliceTag = state.verticalSliceMode ? ' · 🪨 Vertical Slice 3D' : '';
+      titleEl.textContent = `${r.name} · ${modeTitle}${sliceTag}`;
     }
-
-    const avgE = sumE / Math.max(1, samples.length);
-    const totalDist = samples[samples.length - 1].distanceKm;
 
     const minEl = $('#elev-stat-min') || $('#elev-min-val');
-    if (minEl) minEl.textContent = `${Math.round(minE)}m`;
+    if (minEl) minEl.textContent = `${Math.round(metrics.minElevM)}m`;
     const maxEl = $('#elev-stat-max') || $('#elev-max-val');
-    if (maxEl) maxEl.textContent = `${Math.round(maxE)}m`;
-    const avgEl = $('#elev-avg-val');
-    if (avgEl) avgEl.textContent = `${Math.round(avgE)}m`;
+    if (maxEl) maxEl.textContent = `${Math.round(metrics.maxElevM)}m`;
+    const maxNameEl = $('#elev-stat-max-name');
+    if (maxNameEl) {
+      maxNameEl.textContent = metrics.peakSample && metrics.peakSample.name ? `(${metrics.peakSample.name})` : '';
+    }
     const distEl = $('#elev-stat-dist') || $('#elev-dist-val');
-    if (distEl) distEl.textContent = `${totalDist.toFixed(1)} km`;
+    if (distEl) distEl.textContent = `${metrics.totalDistKm.toFixed(1)} km`;
+    const gainEl = $('#elev-stat-gain');
+    if (gainEl) {
+      gainEl.textContent = `+${Math.round(metrics.totalGainM).toLocaleString()}m / -${Math.round(metrics.totalLossM).toLocaleString()}m`;
+    }
     const gradeEl = $('#elev-stat-slope') || $('#elev-grade-val');
-    if (gradeEl) gradeEl.textContent = `${maxGrade.toFixed(1)}%`;
+    if (gradeEl) gradeEl.textContent = `${metrics.maxSlopePct.toFixed(1)}%`;
 
     if (!window.d3) return;
 
     const svg = d3.select('#elevation-chart-svg');
     svg.selectAll('*').remove();
+    activeTransectHoverRefs = null;
 
     const svgNode = svg.node();
     const width = svgNode ? (svgNode.clientWidth || 740) : 740;
-    const height = svgNode ? (svgNode.clientHeight || 170) : 170;
-    const margin = { top: 18, right: 32, bottom: 30, left: 52 };
+    const isSliceMode = Boolean(state.elevationProfileOpen && state.verticalSliceMode);
+    const height = svgNode ? (svgNode.clientHeight || (isSliceMode ? 196 : 155)) : (isSliceMode ? 196 : 155);
+    const margin = { top: 18, right: 34, bottom: 28, left: 54 };
+
+    if (samples.length < 2) {
+      svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', height / 2)
+        .attr('text-anchor', 'middle')
+        .attr('fill', isSliceMode ? '#e2e8f0' : '#64748b')
+        .attr('font-size', '12px')
+        .attr('font-weight', '600')
+        .text('상단의 "✏️ 3D 경로 드래그"를 누른 뒤 3D 지형 위를 드래그해 단면을 그려보세요.');
+      return;
+    }
+
+    if (isSliceMode) {
+      const proj = renderVerticalSlicePanel(samples, metrics, width, height);
+      if (proj) {
+        const leftSea = proj.projectElevDist(0, 0);
+        const rightSea = proj.projectElevDist(proj.totalDistKm, 0);
+        const leftBot = proj.projectElevDist(0, proj.panelBedrockM);
+        const rightBot = proj.projectElevDist(proj.totalDistKm, proj.panelBedrockM);
+
+        // Glowing 0m Sea-Level datum line across the 3D cutaway wall
+        svg.append('line')
+          .attr('x1', leftSea.x).attr('y1', leftSea.y)
+          .attr('x2', rightSea.x).attr('y2', rightSea.y)
+          .attr('stroke', '#38bdf8')
+          .attr('stroke-width', 1.35)
+          .attr('stroke-dasharray', '5,3')
+          .attr('opacity', 0.9);
+
+        svg.append('text')
+          .attr('x', rightSea.x + 5)
+          .attr('y', rightSea.y + 3)
+          .attr('fill', '#7dd3fc')
+          .attr('font-size', '9.5px')
+          .attr('font-weight', '700')
+          .text('0m 해수면');
+
+        // Crisp glowing skyline crest curve aligned pixel-for-pixel with the 3D WebGL front ridge
+        const sliceLineGen = d3.line()
+          .x((d) => proj.projectElevDist(d.distanceKm, d.elevationM).x)
+          .y((d) => proj.projectElevDist(d.distanceKm, d.elevationM).y)
+          .curve(d3.curveMonotoneX);
+
+        svg.append('path')
+          .datum(samples)
+          .attr('fill', 'none')
+          .attr('stroke', '#38bdf8')
+          .attr('stroke-width', 2.2)
+          .attr('opacity', 0.92)
+          .attr('d', sliceLineGen);
+
+        // Left Depth & Elevation Axis aligned against the 3D left wall
+        const yTicksM = [proj.panelBedrockM, -220, 0];
+        const peakStep = proj.panelTopM > 1200 ? 1000 : (proj.panelTopM > 500 ? 500 : 200);
+        for (let m = peakStep; m <= metrics.maxElevM * 1.1; m += peakStep) {
+          yTicksM.push(m);
+        }
+        yTicksM.forEach((tickM) => {
+          const pt = proj.projectElevDist(0, tickM);
+          svg.append('line')
+            .attr('x1', pt.x - 5).attr('y1', pt.y)
+            .attr('x2', pt.x).attr('y2', pt.y)
+            .attr('stroke', tickM < 0 ? '#94a3b8' : '#334155')
+            .attr('stroke-width', 1.2);
+          svg.append('text')
+            .attr('x', pt.x - 8)
+            .attr('y', pt.y + 3)
+            .attr('text-anchor', 'end')
+            .attr('fill', tickM < 0 ? '#cbd5e1' : '#0f172a')
+            .attr('font-size', '10px')
+            .attr('font-weight', tickM === 0 ? '700' : '600')
+            .text(`${tickM}m`);
+        });
+
+        // Bottom Distance Axis along bedrock base
+        const xTicksCount = Math.min(6, Math.max(3, Math.floor((rightBot.x - leftBot.x) / 95)));
+        for (let i = 0; i <= xTicksCount; i++) {
+          const km = (proj.totalDistKm * i) / xTicksCount;
+          const pt = proj.projectElevDist(km, proj.panelBedrockM);
+          svg.append('line')
+            .attr('x1', pt.x).attr('y1', pt.y)
+            .attr('x2', pt.x).attr('y2', pt.y + 4)
+            .attr('stroke', '#94a3b8')
+            .attr('stroke-width', 1.1);
+          svg.append('text')
+            .attr('x', pt.x)
+            .attr('y', Math.min(height - 5, pt.y + 15))
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#cbd5e1')
+            .attr('font-size', '10px')
+            .attr('font-weight', '600')
+            .text(`${km.toFixed(proj.totalDistKm < 5 ? 1 : 0)}km`);
+        }
+
+        // Peak badge
+        if (metrics.peakSample && metrics.maxElevM > 15) {
+          const pkPt = proj.projectElevDist(metrics.peakSample.distanceKm, metrics.peakSample.elevationM);
+          svg.append('circle')
+            .attr('cx', pkPt.x).attr('cy', pkPt.y)
+            .attr('r', 4.5)
+            .attr('fill', '#f59e0b')
+            .attr('stroke', '#ffffff')
+            .attr('stroke-width', 1.6);
+          svg.append('text')
+            .attr('x', Math.min(width - 42, Math.max(46, pkPt.x)))
+            .attr('y', Math.max(12, pkPt.y - 9))
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#92400e')
+            .attr('font-size', '10.5px')
+            .attr('font-weight', '800')
+            .text(`${Math.round(metrics.maxElevM)}m`);
+        }
+
+        const hoverLine = svg.append('line')
+          .attr('stroke', '#00f5ff')
+          .attr('stroke-width', 1.6)
+          .attr('stroke-dasharray', '4,3')
+          .style('opacity', 0);
+
+        const hoverCircle = svg.append('circle')
+          .attr('r', 5.2)
+          .attr('fill', '#0ea5e9')
+          .attr('stroke', '#ffffff')
+          .attr('stroke-width', 2)
+          .style('opacity', 0);
+
+        const xInv = d3.scaleLinear()
+          .domain([leftBot.x, Math.max(leftBot.x + 1, rightBot.x)])
+          .range([0, proj.totalDistKm])
+          .clamp(true);
+
+        const tooltip = d3.select('#elev-chart-tooltip');
+        activeTransectHoverRefs = {
+          hoverLine,
+          hoverCircle,
+          tooltip,
+          margin,
+          width,
+          absCoords: true,
+          getCx: (s) => proj.projectElevDist(s.distanceKm, s.elevationM).x,
+          getCy: (s) => proj.projectElevDist(s.distanceKm, s.elevationM).y,
+          getYBot: (s) => proj.projectElevDist(s.distanceKm, proj.panelBedrockM).y,
+          samples
+        };
+
+        const bisectDistance = d3.bisector(d => d.distanceKm).left;
+
+        svg.append('rect')
+          .attr('x', Math.max(0, leftBot.x - 6))
+          .attr('y', 0)
+          .attr('width', Math.max(40, rightBot.x - leftBot.x + 12))
+          .attr('height', height)
+          .attr('fill', 'transparent')
+          .style('cursor', 'crosshair')
+          .on('pointermove', function(event) {
+            const [mx] = d3.pointer(event);
+            const distVal = xInv(mx);
+            const idx = Math.max(0, Math.min(samples.length - 1, bisectDistance(samples, distVal)));
+            const d0 = samples[idx - 1];
+            const d1 = samples[idx];
+            const s = (!d0) ? d1 : (!d1) ? d0 : (distVal - d0.distanceKm > d1.distanceKm - distVal ? d1 : d0);
+            if (!s) return;
+
+            const surfPt = proj.projectElevDist(s.distanceKm, s.elevationM);
+            const botPt = proj.projectElevDist(s.distanceKm, proj.panelBedrockM);
+            const clampedX = Math.max(88, Math.min(width - 94, surfPt.x));
+            const tipTop = surfPt.y < 64 ? surfPt.y + 14 : Math.max(4, surfPt.y - 68);
+            const strata = helpers ? helpers.getStrataInfo(20, s.elevationM) : null;
+
+            hoverLine.attr('x1', surfPt.x).attr('x2', surfPt.x).attr('y1', Math.max(6, surfPt.y - 16)).attr('y2', botPt.y).style('opacity', 1);
+            hoverCircle.attr('cx', surfPt.x).attr('cy', surfPt.y).style('opacity', 1);
+
+            tooltip
+              .attr('hidden', null)
+              .style('display', 'block')
+              .style('left', `${clampedX}px`)
+              .style('top', `${tipTop}px`)
+              .html(`
+                <strong>${s.name ? s.name + ' · ' : ''}${s.distanceKm.toFixed(1)} km</strong>
+                <div>지표 고도 <span style="color:#38bdf8; font-weight:700;">${Math.round(s.elevationM)} m</span> · 심부 ${proj.panelBedrockM}m</div>
+                ${strata ? `<div style="color:${strata.hex}; font-size:10px; font-weight:600;">지층: ${strata.label}</div>` : ''}
+                <small style="color:#94a3b8;">위도 ${s.lat.toFixed(4)}, 경도 ${s.lng.toFixed(4)}</small>
+              `);
+
+            syncElevationFocusSample(s, 'chart');
+          })
+          .on('pointerleave', function() {
+            hoverLine.style('opacity', 0);
+            hoverCircle.style('opacity', 0);
+            tooltip.attr('hidden', true).style('display', 'none');
+            syncElevationFocusSample(null, 'chart');
+          });
+        return;
+      }
+    }
 
     const chartWidth = Math.max(100, width - margin.left - margin.right);
     const chartHeight = Math.max(50, height - margin.top - margin.bottom);
@@ -3813,10 +5688,10 @@
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
     const xScale = d3.scaleLinear()
-      .domain([0, totalDist])
+      .domain([0, Math.max(0.05, metrics.totalDistKm)])
       .range([0, chartWidth]);
 
-    const yUpper = Math.max(60, maxE * 1.28);
+    const yUpper = Math.max(60, metrics.maxElevM * 1.28);
     const yScale = d3.scaleLinear()
       .domain([0, yUpper])
       .range([chartHeight, 0]);
@@ -3868,7 +5743,7 @@
 
     const xAxis = d3.axisBottom(xScale)
       .ticks(Math.min(7, Math.floor(chartWidth / 75)))
-      .tickFormat(d => `${d}km`);
+      .tickFormat(d => `${Number(d).toFixed(metrics.totalDistKm < 5 ? 1 : 0)}km`);
 
     const yAxis = d3.axisLeft(yScale)
       .ticks(4)
@@ -3884,6 +5759,27 @@
       .attr('color', '#64748b')
       .attr('font-size', '11px')
       .call(yAxis);
+
+    // Peak highlight marker dot on the chart
+    if (metrics.peakSample && metrics.maxElevM > 15) {
+      const px = xScale(metrics.peakSample.distanceKm);
+      const py = yScale(metrics.peakSample.elevationM);
+      g.append('circle')
+        .attr('cx', px)
+        .attr('cy', py)
+        .attr('r', 4)
+        .attr('fill', '#f59e0b')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 1.5);
+      g.append('text')
+        .attr('x', Math.min(chartWidth - 28, Math.max(24, px)))
+        .attr('y', Math.max(10, py - 8))
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#b45309')
+        .attr('font-size', '10px')
+        .attr('font-weight', '700')
+        .text(`${Math.round(metrics.maxElevM)}m`);
+    }
 
     const hoverLine = g.append('line')
       .attr('y1', 0)
@@ -3901,6 +5797,8 @@
       .style('opacity', 0);
 
     const tooltip = d3.select('#elev-chart-tooltip');
+    activeTransectHoverRefs = { hoverLine, hoverCircle, tooltip, xScale, yScale, margin, width, chartHeight, samples };
+
     const bisectDistance = d3.bisector(d => d.distanceKm).left;
 
     g.append('rect')
@@ -3920,31 +5818,30 @@
 
         const cx = xScale(s.distanceKm);
         const cy = yScale(s.elevationM);
+        const clampedX = Math.max(margin.left + 84, Math.min(width - 88, margin.left + cx));
+        const tipTop = cy < 58 ? margin.top + cy + 14 : Math.max(4, margin.top + cy - 58);
 
         hoverLine.attr('x1', cx).attr('x2', cx).style('opacity', 1);
         hoverCircle.attr('cx', cx).attr('cy', cy).style('opacity', 1);
 
         tooltip
+          .attr('hidden', null)
           .style('display', 'block')
-          .style('left', `${margin.left + cx + 12}px`)
-          .style('top', `${Math.max(10, margin.top + cy - 28)}px`)
+          .style('left', `${clampedX}px`)
+          .style('top', `${tipTop}px`)
           .html(`
-            <strong>${s.name ? s.name + '<br>' : ''}${s.distanceKm.toFixed(1)} km</strong>
-            <div>고도: <span style="color:#0284c7; font-weight:700;">${Math.round(s.elevationM)} m</span></div>
-            <small style="color:#64748b;">위도 ${s.lat.toFixed(4)}, 경도 ${s.lng.toFixed(4)}</small>
+            <strong>${s.name ? s.name + ' · ' : ''}${s.distanceKm.toFixed(1)} km</strong>
+            <div>고도 <span style="color:#38bdf8; font-weight:700;">${Math.round(s.elevationM)} m</span></div>
+            <small style="color:#94a3b8;">위도 ${s.lat.toFixed(4)}, 경도 ${s.lng.toFixed(4)}</small>
           `);
 
-        if (elevationPointerMesh) {
-          const surfY = surfaceHeight(s.lat, s.lng);
-          elevationPointerMesh.position.set(s.x, surfY, s.z);
-          elevationPointerMesh.visible = true;
-        }
+        syncElevationFocusSample(s, 'chart');
       })
       .on('pointerleave', function() {
         hoverLine.style('opacity', 0);
         hoverCircle.style('opacity', 0);
-        tooltip.style('display', 'none');
-        if (elevationPointerMesh) elevationPointerMesh.visible = false;
+        tooltip.attr('hidden', true).style('display', 'none');
+        syncElevationFocusSample(null, 'chart');
       });
   }
 
@@ -4376,6 +6273,7 @@
     renderer.toneMappingExposure = 1.28;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.localClippingEnabled = true;
     canvasContainer.append(renderer.domElement);
     resize();
 
@@ -4437,11 +6335,165 @@
     const pointer = new THREE.Vector2();
     let pointerStart;
 
+    function raycastTerrainLatLng(clientX, clientY) {
+      if (!terrain) return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      pointer.set(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+      );
+      raycaster.setFromCamera(pointer, camera);
+      const terrainHit = raycaster.intersectObject(terrain, false)[0];
+      if (!terrainHit) return null;
+      const r = getRegion();
+      const lat = r.bounds.north - (terrainHit.point.z / r.mapDepth + 0.5) * (r.bounds.north - r.bounds.south);
+      const lng = r.bounds.west + (terrainHit.point.x / r.mapWidth + 0.5) * (r.bounds.east - r.bounds.west);
+      return {
+        lat: THREE.MathUtils.clamp(lat, r.bounds.south, r.bounds.north),
+        lng: THREE.MathUtils.clamp(lng, r.bounds.west, r.bounds.east),
+        point: terrainHit.point
+      };
+    }
+
+    function finishTransectDrag() {
+      if (!isDraggingTransect) return;
+      isDraggingTransect = false;
+      const helpers = window.TransectHelpers;
+      const r = getRegion();
+      const regionSpanKm = helpers
+        ? helpers.haversineDistanceKm(r.bounds.south, r.bounds.west, r.bounds.north, r.bounds.east)
+        : 50;
+      const minStepKm = Math.max(0.06, regionSpanKm * 0.01);
+      const simplified = helpers
+        ? helpers.simplifyWaypoints(draftTransectWaypoints, minStepKm)
+        : draftTransectWaypoints.slice();
+
+      let totalDist = 0;
+      if (helpers && simplified.length >= 2) {
+        for (let i = 1; i < simplified.length; i++) {
+          totalDist += helpers.haversineDistanceKm(simplified[i - 1].lat, simplified[i - 1].lng, simplified[i].lat, simplified[i].lng);
+        }
+      } else if (simplified.length >= 2) {
+        totalDist = 1;
+      }
+
+      if (simplified.length >= 2 && totalDist > Math.max(0.05, regionSpanKm * 0.005)) {
+        simplified[0].name = '출발점';
+        simplified[simplified.length - 1].name = '도착점';
+        setDrawingTransect(false);
+        syncElevationFocusSample(null, '3d-drag-end');
+        commit(() => {
+          state.elevationProfileOpen = true;
+          state.climateOverlayOpen = false;
+          state.elevationTransectMode = 'custom-path';
+          state.customTransect = simplified;
+        });
+        showToast('3D 지형 단면 경로를 생성했어요. 경로 또는 차트에 마우스를 올려 고도를 확인하세요.');
+      } else {
+        draftTransectWaypoints = [];
+        syncElevationFocusSample(null, '3d-drag-end');
+        updateElevationProfile();
+        showToast('조금 더 길게 드래그하여 단면 경로를 그려주세요.');
+      }
+    }
+
     renderer.domElement.addEventListener('pointerdown', (event) => {
       pointerStart = { x: event.clientX, y: event.clientY };
+
+      if (drawingTransect && event.button === 0) {
+        const hit = raycastTerrainLatLng(event.clientX, event.clientY);
+        if (hit) {
+          event.preventDefault();
+          isDraggingTransect = true;
+          state.elevationTransectMode = 'custom-path';
+          document.querySelectorAll('.elev-mode-btn').forEach((btn) => {
+            btn.classList.toggle('is-active', btn.dataset.transect === 'custom-path');
+          });
+          draftTransectWaypoints = [{ lat: hit.lat, lng: hit.lng, name: '출발점' }];
+          lastDragRenderTime = 0;
+          const elevM = Math.max(0, heightAt(hit.lat, hit.lng));
+          const pos = worldPosition(hit.lat, hit.lng);
+          syncElevationFocusSample({
+            index: 0,
+            lat: hit.lat,
+            lng: hit.lng,
+            x: pos.x,
+            z: pos.z,
+            distanceKm: 0,
+            elevationM: elevM,
+            name: '출발점'
+          }, '3d-drag');
+        }
+      }
+    });
+
+    renderer.domElement.addEventListener('pointermove', (event) => {
+      if (drawingTransect && isDraggingTransect) {
+        const hit = raycastTerrainLatLng(event.clientX, event.clientY);
+        if (!hit) return;
+        const helpers = window.TransectHelpers;
+        const r = getRegion();
+        const regionSpanKm = helpers
+          ? helpers.haversineDistanceKm(r.bounds.south, r.bounds.west, r.bounds.north, r.bounds.east)
+          : 50;
+        const minStepKm = Math.max(0.06, regionSpanKm * 0.012);
+
+        const prev = draftTransectWaypoints[draftTransectWaypoints.length - 1];
+        const stepKm = helpers ? helpers.haversineDistanceKm(prev.lat, prev.lng, hit.lat, hit.lng) : 0.5;
+        if (draftTransectWaypoints.length === 1) {
+          if (stepKm > 0.01) {
+            draftTransectWaypoints.push({ lat: hit.lat, lng: hit.lng, name: '도착점' });
+          }
+        } else if (stepKm >= minStepKm) {
+          delete prev.name;
+          draftTransectWaypoints.push({ lat: hit.lat, lng: hit.lng, name: '도착점' });
+        } else {
+          draftTransectWaypoints[draftTransectWaypoints.length - 1] = { lat: hit.lat, lng: hit.lng, name: '도착점' };
+        }
+
+        const now = performance.now();
+        if (now - lastDragRenderTime >= 28 && draftTransectWaypoints.length >= 2) {
+          lastDragRenderTime = now;
+          updateElevationProfile(draftTransectWaypoints);
+          if (activeTransectSamples.length > 0) {
+            syncElevationFocusSample(activeTransectSamples[activeTransectSamples.length - 1], '3d-drag');
+          }
+        }
+        return;
+      }
+
+      if (state.elevationProfileOpen && !drawingTransect && !pickingLocation && !droneMode && activeTransectSamples.length >= 2) {
+        const hit = raycastTerrainLatLng(event.clientX, event.clientY);
+        if (!hit || !window.TransectHelpers) {
+          syncElevationFocusSample(null, '3d-hover');
+          return;
+        }
+        const r = getRegion();
+        const regionSpanKm = window.TransectHelpers.haversineDistanceKm(r.bounds.south, r.bounds.west, r.bounds.north, r.bounds.east);
+        const snapped = window.TransectHelpers.nearestSampleByCoord(activeTransectSamples, hit.lat, hit.lng, Math.max(0.35, regionSpanKm * 0.055));
+        if (snapped && snapped.sample) {
+          syncElevationFocusSample(snapped.sample, '3d-hover');
+        } else {
+          syncElevationFocusSample(null, '3d-hover');
+        }
+      }
+    });
+
+    renderer.domElement.addEventListener('pointerleave', () => {
+      if (state.elevationProfileOpen && !isDraggingTransect) {
+        syncElevationFocusSample(null, '3d-hover');
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      if (isDraggingTransect) {
+        finishTransectDrag();
+      }
     });
 
     renderer.domElement.addEventListener('pointerup', (event) => {
+      if (drawingTransect) return;
       if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -4462,8 +6514,18 @@
             setTab('places');
             setPickingLocation(false);
             setLnbOpen(true, 'places');
-            $('#custom-name').focus();
-            showToast('위치를 골랐어요. 장소 이름을 입력해 주세요.');
+            const nameInp = $('#custom-name');
+            if (nameInp) {
+              nameInp.dataset.autofilled = nameInp.value.trim() ? 'false' : 'true';
+              nameInp.focus();
+            }
+            const statusEl = $('#reverse-pick-status');
+            if (statusEl) {
+              statusEl.hidden = false;
+              statusEl.textContent = '선택한 좌표의 주소를 역지오코딩으로 확인 중...';
+            }
+            reverseGeocodeCoordinates(lat, lng, { updateSuggestions: true, updateCustomForm: true });
+            showToast('위치를 골랐어요. 주변 주소 추천을 확인해 보세요.');
             return;
           }
         }
@@ -4501,7 +6563,20 @@
         airportAnimPlane.position.copy(_planePos);
         airportAnimPlane.lookAt(_planeNextPos);
       }
+      if (yeongamTrackCurve && yeongamAnimCars.length > 0) {
+        for (let i = 0; i < yeongamAnimCars.length; i++) {
+          const car = yeongamAnimCars[i];
+          car.phase = (car.phase + delta * car.speed) % 1;
+          yeongamTrackCurve.getPointAt(car.phase, _carPos);
+          yeongamTrackCurve.getPointAt((car.phase + 0.008) % 1, _carNextPos);
+          car.mesh.position.set(_carPos.x, _carPos.y + 0.06, _carPos.z);
+          car.mesh.lookAt(_carNextPos.x, _carNextPos.y + 0.06, _carNextPos.z);
+        }
+      }
       if (!droneMode) controls.update();
+      if (state.elevationProfileOpen && state.verticalSliceMode && activeSlicePlane) {
+        updateActiveSlicePlaneForCamera();
+      }
       updateLabels();
       updateWeather(delta, time);
       updateSolarLighting(delta);

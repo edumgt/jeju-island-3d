@@ -89,6 +89,27 @@
         { month: 11, label: '11월', avgTempC: 9.2, minTempC: 5.2, maxTempC: 13.8, precipMm: 69.2, sunshineHrs: 182, humidityPct: 54, seaTempC: 15.2, windMs: 2.9 },
         { month: 12, label: '12월', avgTempC: 3.1, minTempC: -0.6, maxTempC: 7.4, precipMm: 36.8, sunshineHrs: 194, humidityPct: 48, seaTempC: 12.2, windMs: 3.2 }
       ]
+    },
+    yeongam: {
+      regionId: 'yeongam',
+      stationName: '영암·목포 서남해안 (기상청 165)',
+      climateType: '온난 서남해안 해양성·평야 기후',
+      bestSeason: '4–5월 · 9–10월 (레이스 시즌)',
+      note: '영암호·서해안의 온화한 해양성 기후로 봄·가을철 강수가 적고 일조가 풍부해 모터스포츠 주행과 야외 관람에 최적입니다.',
+      monthly: [
+        { month: 1, label: '1월', avgTempC: 1.7, minTempC: -1.6, maxTempC: 5.8, precipMm: 31.6, sunshineHrs: 154, humidityPct: 67, seaTempC: 6.8, windMs: 4.1 },
+        { month: 2, label: '2월', avgTempC: 3.1, minTempC: -0.6, maxTempC: 7.6, precipMm: 39.2, sunshineHrs: 162, humidityPct: 66, seaTempC: 6.4, windMs: 4.0 },
+        { month: 3, label: '3월', avgTempC: 7.3, minTempC: 3.2, maxTempC: 12.2, precipMm: 57.5, sunshineHrs: 198, humidityPct: 66, seaTempC: 8.6, windMs: 3.7 },
+        { month: 4, label: '4월', avgTempC: 12.9, minTempC: 8.5, maxTempC: 18.0, precipMm: 78.4, sunshineHrs: 212, humidityPct: 67, seaTempC: 12.2, windMs: 3.4 },
+        { month: 5, label: '5월', avgTempC: 17.9, minTempC: 13.7, maxTempC: 22.9, precipMm: 93.2, sunshineHrs: 224, humidityPct: 71, seaTempC: 16.4, windMs: 3.0 },
+        { month: 6, label: '6월', avgTempC: 21.8, minTempC: 18.3, maxTempC: 26.2, precipMm: 149.8, sunshineHrs: 174, humidityPct: 78, seaTempC: 20.4, windMs: 2.8 },
+        { month: 7, label: '7월', avgTempC: 25.4, minTempC: 22.5, maxTempC: 29.2, precipMm: 236.5, sunshineHrs: 164, humidityPct: 84, seaTempC: 23.8, windMs: 3.1 },
+        { month: 8, label: '8월', avgTempC: 26.5, minTempC: 23.4, maxTempC: 30.5, precipMm: 214.2, sunshineHrs: 198, humidityPct: 81, seaTempC: 25.8, windMs: 3.1 },
+        { month: 9, label: '9월', avgTempC: 22.2, minTempC: 18.6, maxTempC: 26.7, precipMm: 148.6, sunshineHrs: 188, humidityPct: 76, seaTempC: 23.2, windMs: 2.9 },
+        { month: 10, label: '10월', avgTempC: 16.4, minTempC: 12.2, maxTempC: 21.4, precipMm: 52.4, sunshineHrs: 214, humidityPct: 69, seaTempC: 19.4, windMs: 3.1 },
+        { month: 11, label: '11월', avgTempC: 10.2, minTempC: 6.1, maxTempC: 14.9, precipMm: 46.8, sunshineHrs: 168, humidityPct: 68, seaTempC: 14.6, windMs: 3.5 },
+        { month: 12, label: '12월', avgTempC: 4.1, minTempC: 0.6, maxTempC: 8.3, precipMm: 31.2, sunshineHrs: 152, humidityPct: 68, seaTempC: 9.8, windMs: 4.0 }
+      ]
     }
   };
 

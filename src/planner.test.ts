@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../assets/terrain-optimizer.js';
 import '../assets/climate-data.js';
+import '../assets/place-search-helpers.js';
+import '../assets/transect-helpers.js';
 
 const TerrainOptimizer = (globalThis as any).TerrainOptimizer;
 const ClimateData = (globalThis as any).ClimateData;
+const PlaceSearchHelpers = (globalThis as any).PlaceSearchHelpers;
+const TransectHelpers = (globalThis as any).TransectHelpers;
 
 const REGIONS = {
   jeju: {
@@ -18,6 +22,9 @@ const REGIONS = {
   },
   gangneung: {
     bounds: { west: 128.360, south: 37.620, east: 129.060, north: 38.225 }
+  },
+  yeongam: {
+    bounds: { west: 126.382, south: 34.712, east: 126.498, north: 34.782 }
   }
 };
 
@@ -58,7 +65,9 @@ function cleanState(raw: any, bounds = REGIONS.jeju.bounds) {
     solarTime: Number.isFinite(Number(raw.solarTime)) ? Math.max(0, Math.min(1439, Math.round(Number(raw.solarTime)))) : 810,
     solarLiveSync: Boolean(raw.solarLiveSync),
     elevationProfileOpen: Boolean(raw.elevationProfileOpen),
-    elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east',
+    elevationTransectMode: ['west-east', 'north-south', 'places-route', 'custom-path'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east',
+    verticalSliceMode: Boolean(raw.verticalSliceMode),
+    customTransect: TransectHelpers.cleanCustomTransect(raw.customTransect, bounds),
     climateOverlayOpen: Boolean(raw.climateOverlayOpen) && !Boolean(raw.elevationProfileOpen),
     climateChartMode: ['overview', 'sunshine', 'marine'].includes(raw.climateChartMode) ? raw.climateChartMode : 'overview',
     terrainDetail: ['adaptive', 'high', 'eco'].includes(raw.terrainDetail) ? raw.terrainDetail : 'adaptive'
@@ -487,8 +496,8 @@ test('TerrainOptimizer generates watertight adaptive quadtree mesh for gangneung
   }
 });
 
-test('ClimateData provides valid 12-month climatological normals and summaries for all 4 regions', () => {
-  const regionIds = ['jeju', 'haeundae', 'incheon', 'gangneung'] as const;
+test('ClimateData provides valid 12-month climatological normals and summaries for all 5 regions', () => {
+  const regionIds = ['jeju', 'haeundae', 'incheon', 'gangneung', 'yeongam'] as const;
   for (const id of regionIds) {
     const profile = ClimateData.getClimateProfile(id);
     assert.equal(profile.regionId, id);
@@ -555,6 +564,288 @@ test('cleanState and share URL params persist climateOverlayOpen and climateChar
   assert.equal(decoded.climateOverlayOpen, true);
   assert.equal(decoded.climateChartMode, 'marine');
 });
+
+test('cleanState, share URL params, and TerrainOptimizer support Yeongam KIC sports car circuit', () => {
+  const input = {
+    markers: [
+      { id: 'kic_grandstand', name: 'KIC 메인 그랜드스탠드', category: '서킷·관람석', lat: 34.7376, lng: 126.4152 },
+      { id: 'kic_marina', name: 'KIC 마리나 워터프론트 코너', category: '레이싱 코스', lat: 34.7310, lng: 126.4222 },
+      { id: 'yeongsanho_bay', name: '은적산·영암호 전망능선', category: '자연·전망', lat: 34.7520, lng: 126.4765 },
+      { id: 'hallasan', name: '한라산', category: '제주', lat: 33.3617, lng: 126.5292 }
+    ],
+    selectedId: 'kic_grandstand',
+    mapStyle: 'natural',
+    heightScale: 100
+  };
+  const cleaned = cleanState(input, REGIONS.yeongam.bounds);
+  assert.equal(cleaned.markers.length, 3);
+  assert.equal(cleaned.selectedId, 'kic_grandstand');
+
+  const url = buildShareUrl('/', {
+    region: 'yeongam',
+    camera: { pos: [-28.5, 42.0, 56.0], target: [-18.0, -11.0, 2.0] },
+    selectedId: 'kic_grandstand',
+    elevationProfileOpen: true
+  });
+  const decoded = parseShareParams(new URL(url).search);
+  assert.equal(decoded.region, 'yeongam');
+  assert.equal(decoded.selectedId, 'kic_grandstand');
+  assert.equal(decoded.elevationProfileOpen, true);
+
+  const bounds = REGIONS.yeongam.bounds;
+  function sampleYeongamMeters(lat: number, lng: number) {
+    if (lng < 126.392 || lng > 126.492 || lat < 34.718 || lat > 34.776) return 0;
+    const dCenter = Math.hypot((lat - 34.7365) * 111.1, (lng - 126.4145) * 91.2);
+    if (dCenter < 1.2) return 9.2;
+    const dWolchul = Math.hypot((lat - 34.7520) * 111.1, (lng - 126.4765) * 91.2);
+    return Math.max(9.0, 680 * Math.exp(-(dWolchul * dWolchul) * 0.45));
+  }
+
+  const mesh = TerrainOptimizer.buildOptimizedTerrainGeometry({
+    mapWidth: 108,
+    mapDepth: 80,
+    bounds,
+    sampleHeightMeters: sampleYeongamMeters,
+    regionId: 'yeongam',
+    quality: 'adaptive'
+  });
+
+  assert.equal(mesh.stats.cols, 384);
+  assert.equal(mesh.stats.rows, 288);
+  assert.ok(mesh.stats.triangleCount < mesh.stats.uniformTriangles);
+  assert.ok(mesh.stats.reductionRatio > 0.30, `expected >30% reduction, got ${(mesh.stats.reductionRatio * 100).toFixed(1)}%`);
+
+  const yeongamSummary = ClimateData.computeClimateSummary('yeongam');
+  assert.ok(yeongamSummary.annualSunshineHrs > 2100, 'Yeongam solar sunshine hours should exceed 2100 hrs');
+});
+
+test('PlaceSearchHelpers parses coordinates and matches supported 3D terrain regions accurately', () => {
+  assert.deepEqual(PlaceSearchHelpers.parseCoordinateQuery('33.4581, 126.9426'), { lat: 33.4581, lng: 126.9426 });
+  assert.deepEqual(PlaceSearchHelpers.parseCoordinateQuery('37.4602 126.4407'), { lat: 37.4602, lng: 126.4407 });
+  assert.deepEqual(PlaceSearchHelpers.parseCoordinateQuery('33.3617° N · 126.5292° E'), { lat: 33.3617, lng: 126.5292 });
+  assert.equal(PlaceSearchHelpers.parseCoordinateQuery('한라산'), null);
+  assert.equal(PlaceSearchHelpers.parseCoordinateQuery('95.123, 126.529'), null);
+
+  assert.equal(PlaceSearchHelpers.findMatchingRegionId(33.4581, 126.9426, REGIONS), 'jeju');
+  assert.equal(PlaceSearchHelpers.findMatchingRegionId(37.4602, 126.4407, REGIONS), 'incheon');
+  assert.equal(PlaceSearchHelpers.findMatchingRegionId(34.7376, 126.4152, REGIONS), 'yeongam');
+  assert.equal(PlaceSearchHelpers.findMatchingRegionId(37.5665, 126.9780, REGIONS), null);
+
+  const rect = PlaceSearchHelpers.buildViewportRectangle(REGIONS.jeju.bounds);
+  assert.deepEqual(rect, {
+    low: { latitude: 33.15, longitude: 126.12 },
+    high: { latitude: 33.6, longitude: 127.0 }
+  });
+});
+
+test('PlaceSearchHelpers normalizes reverse geocode v4/v3, Places Autocomplete, and Place Details responses', () => {
+  const revV4Payload = {
+    results: [
+      {
+        placeId: 'ChIJ-seongsan',
+        formattedAddress: '대한민국 제주특별자치도 서귀포시 성산읍 성산리 1',
+        location: { latitude: 33.4581, longitude: 126.9426 },
+        types: ['natural_feature', 'tourist_attraction'],
+        addressComponents: [
+          { longText: '성산일출봉', types: ['natural_feature'] },
+          { longText: '성산읍', types: ['sublocality_level_2'] }
+        ]
+      },
+      {
+        placeId: 'ChIJ-dup',
+        formattedAddress: '대한민국 제주특별자치도 서귀포시 성산읍 성산리 1',
+        location: { latitude: 33.4581, longitude: 126.9426 },
+        types: ['natural_feature'],
+        addressComponents: [{ longText: '성산일출봉', types: ['natural_feature'] }]
+      }
+    ]
+  };
+
+  const normalizedV4 = PlaceSearchHelpers.normalizeReverseGeocodeResults(
+    revV4Payload,
+    REGIONS.jeju.bounds,
+    REGIONS,
+    { lat: 33.38, lng: 126.56 }
+  );
+  assert.equal(normalizedV4.length, 1, 'duplicate results at same coords/name should be deduplicated');
+  assert.equal(normalizedV4[0].name, '성산일출봉');
+  assert.equal(normalizedV4[0].inBounds, true);
+  assert.equal(normalizedV4[0].matchedRegionId, 'jeju');
+  assert.equal(normalizedV4[0].source, 'reverse-geocode');
+  assert.ok(normalizedV4[0].distanceKm > 0);
+
+  const autoPayload = {
+    suggestions: [
+      {
+        placePrediction: {
+          placeId: 'ChIJ-airport',
+          structuredFormat: {
+            mainText: { text: '인천국제공항' },
+            secondaryText: { text: '대한민국 인천광역시 중구 공항로 272' }
+          },
+          types: ['airport', 'point_of_interest'],
+          distanceMeters: 12400
+        }
+      }
+    ]
+  };
+  const autoList = PlaceSearchHelpers.normalizeAutocompleteSuggestions(autoPayload);
+  assert.equal(autoList.length, 1);
+  assert.equal(autoList[0].name, '인천국제공항');
+  assert.equal(autoList[0].needsDetails, true);
+  assert.equal(autoList[0].distanceKm, 12.4);
+
+  const details = PlaceSearchHelpers.normalizePlaceDetails(
+    {
+      id: 'ChIJ-airport',
+      displayName: { text: '인천국제공항' },
+      formattedAddress: '대한민국 인천광역시 중구 공항로 272',
+      location: { latitude: 37.4602, longitude: 126.4407 },
+      types: ['airport']
+    },
+    REGIONS.jeju.bounds,
+    REGIONS
+  );
+  assert.ok(details);
+  assert.equal(details.inBounds, false);
+  assert.equal(details.matchedRegionId, 'incheon');
+});
+
+test('PlaceSearchHelpers enforces Tier 2 quota detection without false positives on empty results', () => {
+  assert.equal(PlaceSearchHelpers.isQuotaExceededResponse(429, {}), true);
+  assert.equal(PlaceSearchHelpers.isQuotaExceededResponse(403, { error: { status: 'RESOURCE_EXHAUSTED' } }), true);
+  assert.equal(PlaceSearchHelpers.isQuotaExceededResponse(200, { status: 'OVER_QUERY_LIMIT' }), true);
+  assert.equal(PlaceSearchHelpers.isQuotaExceededResponse(200, { status: 'ZERO_RESULTS', results: [] }), false);
+  assert.equal(PlaceSearchHelpers.isQuotaExceededResponse(404, { error: { status: 'NOT_FOUND' } }), false);
+  assert.equal(PlaceSearchHelpers.isQuotaExceededResponse(200, { suggestions: [] }), false);
+});
+
+test('TransectHelpers samples multi-point cross-sections uniformly and computes gain/loss/slope metrics', () => {
+  const waypoints = [
+    { lat: 33.36, lng: 126.30, name: '서쪽 기점' },
+    { lat: 33.36, lng: 126.53, name: '백록담 능선' },
+    { lat: 33.36, lng: 126.76, name: '동쪽 종점' }
+  ];
+
+  // Synthetic mountain ridge centered around lng = 126.53 (peak 1950m)
+  const sampleHeight = (_lat: number, lng: number) => {
+    const d = Math.abs(lng - 126.53) / 0.23;
+    return Math.max(0, 1950 * (1 - d));
+  };
+
+  const samples = TransectHelpers.sampleTransectPath(waypoints, sampleHeight, {
+    sampleCount: 61,
+    mapPoint: (lat: number, lng: number) => ({ x: (lng - 126.53) * 100, z: (33.36 - lat) * 100 })
+  });
+
+  assert.equal(samples.length, 61);
+  assert.equal(samples[0].distanceKm, 0);
+  assert.equal(samples[0].name, '서쪽 기점');
+  assert.equal(samples[samples.length - 1].name, '동쪽 종점');
+
+  // Uniform distance spacing check
+  const step0 = samples[1].distanceKm - samples[0].distanceKm;
+  const stepLast = samples[60].distanceKm - samples[59].distanceKm;
+  assert.ok(Math.abs(step0 - stepLast) < 0.05, 'samples should have near-uniform km spacing');
+
+  const metrics = TransectHelpers.computeTransectMetrics(samples);
+  assert.ok(metrics.maxElevM > 1900 && metrics.maxElevM <= 1950);
+  assert.ok(metrics.minElevM >= 0 && metrics.minElevM < 20);
+  assert.ok(metrics.totalDistKm > 40 && metrics.totalDistKm < 46);
+  assert.ok(metrics.totalGainM > 1900, 'ascent gain should capture full ridge climb');
+  assert.ok(metrics.totalLossM > 1900, 'descent loss should capture ridge descent');
+  assert.ok(metrics.maxSlopePct > 5 && metrics.avgSlopePct > 4);
+  assert.equal(metrics.peakIndex, 30);
+
+  // Snapping from 3D terrain coordinate back to nearest sample
+  const snapped = TransectHelpers.nearestSampleByCoord(samples, 33.36, 126.53, 5);
+  assert.ok(snapped);
+  assert.equal(snapped.index, 30);
+  assert.equal(TransectHelpers.nearestSampleByCoord(samples, 37.5, 127.0, 5), null);
+});
+
+test('TransectHelpers simplifies freehand drag waypoints and cleanState validates custom-path within region bounds', () => {
+  const denseDrag = [
+    { lat: 33.3500, lng: 126.4000 },
+    { lat: 33.3501, lng: 126.4002 }, // < 30m away, should be pruned
+    { lat: 33.3550, lng: 126.4500 },
+    { lat: 33.3617, lng: 126.5292 }
+  ];
+  const simplified = TransectHelpers.simplifyWaypoints(denseDrag, 0.25);
+  assert.equal(simplified.length, 3);
+
+  const cleaned = cleanState({
+    markers: [],
+    elevationProfileOpen: true,
+    elevationTransectMode: 'custom-path',
+    customTransect: [
+      { lat: 33.35, lng: 126.40 },
+      { lat: 38.00, lng: 128.00 }, // outside Jeju bounds -> dropped
+      { lat: 33.37, lng: 126.55 }
+    ]
+  }, REGIONS.jeju.bounds);
+
+  assert.equal(cleaned.elevationTransectMode, 'custom-path');
+  assert.equal(cleaned.customTransect.length, 2);
+});
+
+test('TransectHelpers builds closed 3D Vertical Slice cut-block geometry and detects straight vs curved paths', () => {
+  const straightSamples = [
+    { index: 0, lat: 33.36, lng: 126.2, x: -50, z: 0, distanceKm: 0, elevationM: 10 },
+    { index: 1, lat: 33.36, lng: 126.5, x: 0, z: 0, distanceKm: 25, elevationM: 1620 },
+    { index: 2, lat: 33.36, lng: 126.8, x: 50, z: 0, distanceKm: 50, elevationM: 25 }
+  ];
+  assert.equal(TransectHelpers.isPathCollinear(straightSamples, 0.05), true);
+
+  const curvedSamples = [
+    { index: 0, lat: 33.36, lng: 126.2, x: -50, z: 0, distanceKm: 0, elevationM: 10 },
+    { index: 1, lat: 33.42, lng: 126.5, x: 0, z: -22, distanceKm: 28, elevationM: 1200 },
+    { index: 2, lat: 33.36, lng: 126.8, x: 50, z: 0, distanceKm: 56, elevationM: 25 }
+  ];
+  assert.equal(TransectHelpers.isPathCollinear(curvedSamples, 0.05), false);
+
+  const cutPlane = TransectHelpers.computeSliceCutPlaneParams(straightSamples);
+  assert.ok(cutPlane);
+  assert.equal(cutPlane.midX, 0);
+  assert.equal(cutPlane.midZ, 0);
+  assert.equal(cutPlane.normalX, 0);
+  assert.equal(cutPlane.normalZ, 1);
+
+  const panelSlice = TransectHelpers.buildVerticalSliceGeometryData(straightSamples, {
+    mode: 'panel',
+    halfWidth: 6.0,
+    bedrockY: -12,
+    maxElevM: 1620
+  });
+  assert.ok(panelSlice.stats.vertexCount > 60);
+  assert.ok(panelSlice.stats.triangleCount > 30);
+  assert.equal(panelSlice.positions.length, panelSlice.stats.vertexCount * 3);
+  assert.equal(panelSlice.colors.length, panelSlice.stats.vertexCount * 3);
+  assert.equal(panelSlice.indices.length, panelSlice.stats.triangleCount * 3);
+  for (let i = 0; i < panelSlice.positions.length; i++) {
+    assert.ok(Number.isFinite(panelSlice.positions[i]), `Position[${i}] must be finite`);
+  }
+
+  const worldSlice = TransectHelpers.buildVerticalSliceGeometryData(curvedSamples, {
+    mode: 'world',
+    halfWidth: 1.5,
+    bedrockY: -4.0,
+    maxElevM: 1620,
+    getSurfaceY: (s: any) => s.elevationM * 0.006
+  });
+  assert.ok(worldSlice.stats.triangleCount > 30);
+
+  assert.equal(TransectHelpers.getStrataInfo(20, 800).key, 'topsoil');
+  assert.equal(TransectHelpers.getStrataInfo(140, 800).key, 'volcanic-tuff');
+  assert.equal(TransectHelpers.getStrataInfo(350, 800).key, 'basalt-crust');
+  assert.equal(TransectHelpers.getStrataInfo(700, 800).key, 'bedrock');
+
+  const sliceState = cleanState({ markers: [], verticalSliceMode: true, elevationProfileOpen: true });
+  assert.equal(sliceState.verticalSliceMode, true);
+});
+
+
+
 
 
 

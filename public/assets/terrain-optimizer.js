@@ -24,6 +24,11 @@
       adaptive: { baseCols: 24, baseRows: 24, maxDepth: 4, errorTolM: 2.2, slopeTolM: 6.2, coastDepth: 4, oceanMarginCells: 2 },
       high:     { baseCols: 24, baseRows: 24, maxDepth: 4, errorTolM: 0.9, slopeTolM: 2.8, coastDepth: 4, oceanMarginCells: 3 },
       eco:      { baseCols: 16, baseRows: 16, maxDepth: 4, errorTolM: 5.5, slopeTolM: 14.0, coastDepth: 3, oceanMarginCells: 1 }
+    },
+    yeongam: {
+      adaptive: { baseCols: 24, baseRows: 18, maxDepth: 4, errorTolM: 1.4, slopeTolM: 4.0, coastDepth: 4, oceanMarginCells: 2 },
+      high:     { baseCols: 24, baseRows: 18, maxDepth: 4, errorTolM: 0.6, slopeTolM: 1.9, coastDepth: 4, oceanMarginCells: 3 },
+      eco:      { baseCols: 16, baseRows: 12, maxDepth: 4, errorTolM: 4.0, slopeTolM: 10.5, coastDepth: 3, oceanMarginCells: 1 }
     }
   };
 
