@@ -19,6 +19,8 @@
   <script defer src="/assets/jeju-roads.js"></script>
   <script defer src="/assets/haeundae-data.js"></script>
   <script defer src="/assets/incheon-data.js"></script>
+  <script defer src="/assets/gangneung-data.js"></script>
+  <script defer src="/assets/climate-data.js"></script>
   <script defer src="/assets/terrain-optimizer.js"></script>
   <script defer src="/jeju-planner.js"></script>
 </head>
@@ -26,7 +28,12 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="편집 메뉴 열기" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <button id="lnb-toggle" class="icon-button lnb-toggle" type="button" aria-label="좌측 메뉴 열기" aria-controls="sidebar" aria-expanded="false" title="메뉴 열기/닫기 (LNB)">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <rect x="2.5" y="3.5" width="15" height="13" rx="2.5" stroke="currentColor" stroke-width="1.6"/>
+            <line x1="7.5" y1="3.5" x2="7.5" y2="16.5" stroke="currentColor" stroke-width="1.6"/>
+          </svg>
+        </button>
         <span id="brand-mark" class="brand-mark" aria-hidden="true">J</span>
         <div class="brand-copy">
           <strong id="brand-title">JEJU STUDIO</strong>
@@ -34,46 +41,118 @@
         </div>
       </div>
 
-      <!-- GNB 주요 관광지 선택 목록 -->
-      <nav class="gnb-destination-nav" aria-label="주요 관광지 선택">
-        <span class="gnb-destination-kicker">관광지 선택</span>
-        <div class="destination-tabs" role="tablist">
-          <button type="button" class="dest-tab is-active" id="tab-dest-jeju" data-region="jeju" role="tab" aria-selected="true" title="제주도 3D 플래너">
-            <span class="dest-tab-icon">🍊</span>
-            <div class="dest-tab-text">
-              <strong>제주도</strong>
-              <small>한라산·성산일출봉</small>
-            </div>
-          </button>
-          <button type="button" class="dest-tab" id="tab-dest-haeundae" data-region="haeundae" role="tab" aria-selected="false" title="부산 해운대 3D 플래너">
-            <span class="dest-tab-icon">🌊</span>
-            <div class="dest-tab-text">
-              <strong>부산 해운대</strong>
-              <small>해수욕장·동백섬</small>
-            </div>
-          </button>
-          <button type="button" class="dest-tab" id="tab-dest-incheon" data-region="incheon" role="tab" aria-selected="false" title="인천·인천대교·인천공항 3D 플래너">
-            <span class="dest-tab-icon">✈️</span>
-            <div class="dest-tab-text">
-              <strong>인천</strong>
-              <small>인천공항·인천대교·송도</small>
-            </div>
-          </button>
-        </div>
-      </nav>
-
       <div class="topbar-actions">
         <span id="save-status" class="save-status">● 자동 저장</span>
-        <button id="open-plan" class="text-button" type="button">지도 열기</button>
-        <button id="reset-plan" class="text-button" type="button">처음부터</button>
         <button id="share-view" class="text-button share-button" type="button" title="현재 3D 지도 뷰와 장소를 URL 링크로 복사하여 공유"><span class="share-icon" aria-hidden="true">🔗</span> 공유하기</button>
         <button id="save-plan" class="primary-button top-save" type="button">지도 저장 <span aria-hidden="true">↗</span></button>
         <input id="plan-file" type="file" accept="application/json,.json" hidden>
       </div>
     </header>
 
+    <div id="lnb-backdrop" class="lnb-backdrop" hidden></div>
+
     <main class="workspace">
-      <aside id="sidebar" class="sidebar" aria-label="지도 편집 도구">
+      <!-- Slim Gemini/ChatGPT-style Left Navigation Rail -->
+      <nav class="lnb-rail" aria-label="좌측 빠른 메뉴">
+        <div class="lnb-rail-group" role="group" aria-label="관광지 빠른 전환">
+          <button type="button" class="rail-dest-btn is-active" data-region="jeju" title="제주도 (한라산·성산일출봉)">
+            <span class="rail-icon">🍊</span>
+            <small>제주</small>
+          </button>
+          <button type="button" class="rail-dest-btn" data-region="haeundae" title="부산 해운대 (해수욕장·동백섬)">
+            <span class="rail-icon">🌊</span>
+            <small>부산</small>
+          </button>
+          <button type="button" class="rail-dest-btn" data-region="incheon" title="인천 (인천공항·인천대교·송도)">
+            <span class="rail-icon">✈️</span>
+            <small>인천</small>
+          </button>
+          <button type="button" class="rail-dest-btn" data-region="gangneung" title="강릉·경포 (경포대·바다·설악산)">
+            <span class="rail-icon">🏔️</span>
+            <small>강릉</small>
+          </button>
+        </div>
+
+        <div class="rail-divider"></div>
+
+        <div class="lnb-rail-group" role="group" aria-label="편집 메뉴 열기">
+          <button type="button" class="rail-tab-btn" data-rail-tab="places" title="장소 탐색 및 내 지도">
+            <span class="rail-icon">📍</span>
+            <small>장소</small>
+          </button>
+          <button type="button" class="rail-tab-btn" data-rail-tab="layers" title="지형 스타일·날씨·태양광">
+            <span class="rail-icon">🎨</span>
+            <small>스타일</small>
+          </button>
+          <button type="button" class="rail-tab-btn" data-rail-tab="guide" title="사용 안내 및 출처">
+            <span class="rail-icon">📖</span>
+            <small>안내</small>
+          </button>
+        </div>
+
+        <div class="lnb-rail-bottom">
+          <button type="button" id="rail-open-plan" class="rail-util-btn" title="저장한 지도 파일 열기">
+            <span class="rail-icon">📂</span>
+            <small>열기</small>
+          </button>
+          <button type="button" id="rail-reset-plan" class="rail-util-btn" title="처음 지도 구성으로 초기화">
+            <span class="rail-icon">↺</span>
+            <small>초기화</small>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Offcanvas Left Navigation Drawer (LNB) -->
+      <aside id="sidebar" class="sidebar lnb-drawer" aria-label="좌측 내비게이션 메뉴" aria-hidden="true">
+        <div class="lnb-drawer-header">
+          <div class="lnb-drawer-brand">
+            <span id="lnb-brand-mark" class="brand-mark brand-mark-sm" aria-hidden="true">J</span>
+            <div class="lnb-drawer-brand-text">
+              <strong id="lnb-brand-title">JEJU STUDIO</strong>
+              <span id="lnb-brand-sub">3D 지도 내비게이션</span>
+            </div>
+          </div>
+          <button id="lnb-close" class="lnb-close-btn" type="button" aria-label="좌측 메뉴 닫기" title="메뉴 닫기 (Esc)">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M10.5 3.5L6 8L10.5 12.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="lnb-regions-block">
+          <span class="lnb-section-label">관광지 선택</span>
+          <div class="destination-tabs" role="tablist" aria-label="주요 관광지 선택">
+            <button type="button" class="dest-tab is-active" id="tab-dest-jeju" data-region="jeju" role="tab" aria-selected="true" title="제주도 3D 플래너">
+              <span class="dest-tab-icon">🍊</span>
+              <div class="dest-tab-text">
+                <strong>제주도</strong>
+                <small>한라산·성산일출봉</small>
+              </div>
+            </button>
+            <button type="button" class="dest-tab" id="tab-dest-haeundae" data-region="haeundae" role="tab" aria-selected="false" title="부산 해운대 3D 플래너">
+              <span class="dest-tab-icon">🌊</span>
+              <div class="dest-tab-text">
+                <strong>부산 해운대</strong>
+                <small>해수욕장·동백섬</small>
+              </div>
+            </button>
+            <button type="button" class="dest-tab" id="tab-dest-incheon" data-region="incheon" role="tab" aria-selected="false" title="인천·인천대교·인천공항 3D 플래너">
+              <span class="dest-tab-icon">✈️</span>
+              <div class="dest-tab-text">
+                <strong>인천</strong>
+                <small>공항·인천대교·송도</small>
+              </div>
+            </button>
+            <button type="button" class="dest-tab" id="tab-dest-gangneung" data-region="gangneung" role="tab" aria-selected="false" title="강릉 경포대·동해바다·설악산 3D 플래너">
+              <span class="dest-tab-icon">🏔️</span>
+              <div class="dest-tab-text">
+                <strong>강릉·경포</strong>
+                <small>경포대·바다·설악산</small>
+              </div>
+            </button>
+          </div>
+        </div>
+
         <div class="sidebar-intro">
           <div class="eyebrow"><span class="eyebrow-line"></span> <span id="sidebar-eyebrow">YOUR ISLAND, YOUR MAP</span></div>
           <h1 id="sidebar-title">제주를<br>새롭게 살펴보세요.</h1>
@@ -269,6 +348,11 @@
             <div class="source-note"><strong>지형 자료</strong><p>섬 윤곽 참고: Natural Earth 1:10m<br>고도·해안선 보정: Mapzen Terrain Tiles (SRTM/USGS)</p><a href="https://www.naturalearthdata.com/about/terms-of-use/" target="_blank" rel="noopener">자료 출처 보기 ↗</a></div>
           </section>
         </div>
+
+        <div class="lnb-drawer-footer">
+          <button id="open-plan" class="lnb-footer-btn" type="button">📂 지도 열기</button>
+          <button id="reset-plan" class="lnb-footer-btn lnb-footer-btn-muted" type="button">↺ 처음부터</button>
+        </div>
       </aside>
 
       <section id="viewer" class="viewer" aria-label="제주도 3D 지도">
@@ -292,6 +376,7 @@
           <div class="tool-divider"></div>
           <button id="weather-quick-toggle" type="button" class="tool-button" aria-label="날씨 효과 변경" title="날씨 효과 전환 (맑음·비·눈·안개)"><span class="tool-icon" id="quick-weather-icon">☀️</span><small id="quick-weather-label">날씨</small></button>
           <button id="elevation-toggle" type="button" class="tool-button" aria-label="D3.js 고도 프로필 차트 열기" aria-pressed="false" title="D3.js 지형 고도 프로필 단면도"><span class="tool-icon">📊</span><small>고도</small></button>
+          <button id="climate-toggle" type="button" class="tool-button" aria-label="D3.js 연간 기후 데이터 차트 열기" aria-pressed="false" title="D3.js 지역별 연간 기후 데이터 오버레이"><span class="tool-icon">🌡️</span><small>기후</small></button>
         </div>
 
         <!-- D3.js Elevation Profile Overlay Panel -->
@@ -335,6 +420,57 @@
             <svg id="elevation-chart-svg" class="elevation-chart-svg"></svg>
             <div id="elev-chart-tooltip" class="elev-chart-tooltip" hidden></div>
           </div>
+        </div>
+
+        <!-- D3.js Yearly Climate Data Overlay Panel -->
+        <div id="climate-overlay-panel" class="climate-overlay-panel" hidden>
+          <div class="elev-panel-header">
+            <div class="elev-title-wrap">
+              <span class="elev-kicker" id="climate-station-kicker">기상청 30년 평년값 · 제주</span>
+              <div class="climate-title-row">
+                <strong id="climate-chart-title">제주도 연간 기후 데이터</strong>
+                <span class="climate-subtitle" id="climate-type-label">온난 습윤 아열대성 해양 기후</span>
+              </div>
+            </div>
+            <div class="elev-panel-modes" role="tablist" aria-label="기후 지표 선택">
+              <button type="button" class="climate-mode-btn is-active" data-climate-mode="overview" title="월별 기온 범위 및 강수량">기온 · 강수량</button>
+              <button type="button" class="climate-mode-btn" data-climate-mode="sunshine" title="월별 일조시간 및 상대습도">일조 · 습도</button>
+              <button type="button" class="climate-mode-btn" data-climate-mode="marine" title="월별 연안 수온 및 평균 풍속">수온 · 풍속</button>
+            </div>
+            <div class="elev-panel-actions">
+              <button type="button" id="climate-close-btn" class="elev-close-btn" aria-label="연간 기후 패널 닫기">×</button>
+            </div>
+          </div>
+
+          <div class="elev-stats-bar climate-stats-bar">
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">연평균 기온</span>
+              <strong id="climate-stat-temp">0°C</strong>
+              <small id="climate-stat-temp-range"></small>
+            </div>
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">연간 강수량</span>
+              <strong id="climate-stat-precip">0 mm</strong>
+              <small id="climate-stat-precip-peak"></small>
+            </div>
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">연간 일조</span>
+              <strong id="climate-stat-sun">0 hr</strong>
+              <small id="climate-stat-humidity"></small>
+            </div>
+            <div class="elev-stat-item">
+              <span class="elev-stat-label">추천 계절</span>
+              <strong id="climate-stat-season">-</strong>
+            </div>
+            <div class="climate-legend" id="climate-legend"></div>
+          </div>
+
+          <div class="elev-chart-container climate-chart-container" id="climate-chart-container">
+            <svg id="climate-chart-svg" class="elevation-chart-svg"></svg>
+            <div id="climate-chart-tooltip" class="elev-chart-tooltip" hidden></div>
+          </div>
+
+          <p id="climate-note" class="climate-note"></p>
         </div>
 
         <div id="drone-hud" class="drone-hud" hidden><strong>DRONE VIEW <b id="drone-speed">100m</b></strong><span>↑ ↓ 전진 · 후진 · ← → 천천히 선회</span></div>

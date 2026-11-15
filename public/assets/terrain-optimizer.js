@@ -19,6 +19,11 @@
       adaptive: { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 1.2, slopeTolM: 3.8, coastDepth: 4, oceanMarginCells: 2 },
       high:     { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 0.5, slopeTolM: 1.8, coastDepth: 4, oceanMarginCells: 3 },
       eco:      { baseCols: 16, baseRows: 12, maxDepth: 4, errorTolM: 3.4, slopeTolM: 9.5, coastDepth: 3, oceanMarginCells: 1 }
+    },
+    gangneung: {
+      adaptive: { baseCols: 24, baseRows: 24, maxDepth: 4, errorTolM: 2.2, slopeTolM: 6.2, coastDepth: 4, oceanMarginCells: 2 },
+      high:     { baseCols: 24, baseRows: 24, maxDepth: 4, errorTolM: 0.9, slopeTolM: 2.8, coastDepth: 4, oceanMarginCells: 3 },
+      eco:      { baseCols: 16, baseRows: 16, maxDepth: 4, errorTolM: 5.5, slopeTolM: 14.0, coastDepth: 3, oceanMarginCells: 1 }
     }
   };
 

@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../assets/terrain-optimizer.js';
+import '../assets/climate-data.js';
 
 const TerrainOptimizer = (globalThis as any).TerrainOptimizer;
+const ClimateData = (globalThis as any).ClimateData;
 
 const REGIONS = {
   jeju: {
@@ -13,6 +15,9 @@ const REGIONS = {
   },
   incheon: {
     bounds: { west: 126.350, south: 37.330, east: 126.750, north: 37.560 }
+  },
+  gangneung: {
+    bounds: { west: 128.360, south: 37.620, east: 129.060, north: 38.225 }
   }
 };
 
@@ -54,6 +59,8 @@ function cleanState(raw: any, bounds = REGIONS.jeju.bounds) {
     solarLiveSync: Boolean(raw.solarLiveSync),
     elevationProfileOpen: Boolean(raw.elevationProfileOpen),
     elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east',
+    climateOverlayOpen: Boolean(raw.climateOverlayOpen) && !Boolean(raw.elevationProfileOpen),
+    climateChartMode: ['overview', 'sunshine', 'marine'].includes(raw.climateChartMode) ? raw.climateChartMode : 'overview',
     terrainDetail: ['adaptive', 'high', 'eco'].includes(raw.terrainDetail) ? raw.terrainDetail : 'adaptive'
   };
 }
@@ -117,6 +124,27 @@ test('cleanState validates markers within Incheon, Incheon Bridge, Incheon Airpo
   assert.equal(output.selectedId, 'incheon_airport');
 });
 
+test('cleanState validates markers within Gangneung Gyeongpodae and Seoraksan bounds', () => {
+  const input = {
+    markers: [
+      { id: 'gyeongpodae', name: '경포대', category: '명소', lat: 37.7935, lng: 128.8885 },
+      { id: 'gyeongpo_beach', name: '경포해변', category: '해변', lat: 37.8135, lng: 128.9055 },
+      { id: 'seoraksan', name: '설악산 대청봉', category: '명산', lat: 38.1194, lng: 128.4655 },
+      { id: 'hallasan', name: '한라산', category: '제주', lat: 33.3617, lng: 126.5292 }
+    ],
+    selectedId: 'gyeongpodae',
+    mapStyle: 'natural',
+    heightScale: 100
+  };
+
+  const output = cleanState(input, REGIONS.gangneung.bounds);
+  assert.equal(output.markers.length, 3);
+  assert.equal(output.markers[0].id, 'gyeongpodae');
+  assert.equal(output.markers[1].id, 'gyeongpo_beach');
+  assert.equal(output.markers[2].id, 'seoraksan');
+  assert.equal(output.selectedId, 'gyeongpodae');
+});
+
 test('cleanState clamps heightScale between 40 and 180', () => {
   const low = cleanState({ markers: [] }, REGIONS.haeundae.bounds);
   assert.equal(low.heightScale, 100);
@@ -175,6 +203,8 @@ export function buildShareUrl(originPath: string, options: {
   solarTime?: number;
   solarDate?: string;
   elevationProfileOpen?: boolean;
+  climateOverlayOpen?: boolean;
+  climateChartMode?: string;
   terrainDetail?: string;
   places?: string[];
 }): string {
@@ -193,6 +223,12 @@ export function buildShareUrl(originPath: string, options: {
   if (options.solarTime !== undefined && options.solarTime !== 810) url.searchParams.set('time', String(Math.round(options.solarTime)));
   if (options.solarDate && options.solarDate !== '2026-11-10') url.searchParams.set('date', options.solarDate);
   if (options.elevationProfileOpen) url.searchParams.set('elev', '1');
+  if (options.climateOverlayOpen) {
+    url.searchParams.set('climate', '1');
+    if (options.climateChartMode && options.climateChartMode !== 'overview') {
+      url.searchParams.set('cmode', options.climateChartMode);
+    }
+  }
   if (options.terrainDetail && options.terrainDetail !== 'adaptive') url.searchParams.set('mesh', options.terrainDetail);
   if (options.places && options.places.length > 0) url.searchParams.set('places', options.places.join(','));
   return url.toString();
@@ -219,6 +255,8 @@ export function parseShareParams(queryString: string): any {
   if (params.has('time')) result.solarTime = Number(params.get('time'));
   if (params.has('date')) result.solarDate = params.get('date');
   if (params.has('elev')) result.elevationProfileOpen = params.get('elev') === '1' || params.get('elev') === 'true';
+  if (params.has('climate')) result.climateOverlayOpen = params.get('climate') === '1' || params.get('climate') === 'true';
+  if (params.has('cmode')) result.climateChartMode = params.get('cmode');
   if (params.has('mesh')) result.terrainDetail = params.get('mesh');
   if (params.has('places')) result.places = params.get('places')!.split(',');
   return result;
@@ -378,4 +416,145 @@ test('TerrainOptimizer generates watertight adaptive quadtree mesh concentrating
   assert.ok(eco.stats.triangleCount < adaptive.stats.triangleCount, 'eco should have fewer triangles than adaptive');
   assert.ok(adaptive.stats.triangleCount <= high.stats.triangleCount, 'adaptive should have <= triangles than high');
 });
+
+test('buildShareUrl and parseShareParams preserve gangneung region and Gyeongpodae selection', () => {
+  const url = buildShareUrl('/', {
+    region: 'gangneung',
+    camera: { pos: [87.5, 56.5, 122.5], target: [-3.0, -14.0, -5.0] },
+    selectedId: 'gyeongpodae',
+    elevationProfileOpen: true
+  });
+  const decoded = parseShareParams(new URL(url).search);
+  assert.equal(decoded.region, 'gangneung');
+  assert.equal(decoded.selectedId, 'gyeongpodae');
+  assert.equal(decoded.elevationProfileOpen, true);
+  assert.deepEqual(decoded.camera.target, [-3.0, -14.0, -5.0]);
+});
+
+test('TerrainOptimizer generates watertight adaptive quadtree mesh for gangneung coast and Seoraksan', () => {
+  const bounds = REGIONS.gangneung.bounds;
+  function sampleGangneungMeters(lat: number, lng: number) {
+    // East Sea coast roughly around lng = 128.91 - (lat - 37.75)*0.45
+    const coastLng = 128.93 - Math.max(0, lat - 37.72) * 0.62;
+    if (lng > coastLng) return 0;
+    const distCoast = coastLng - lng;
+    const base = Math.min(250, distCoast * 900);
+    // Seoraksan peak in NW
+    const dSeorak = Math.hypot((lng - 128.4655) / 0.08, (lat - 38.1194) / 0.06);
+    const seorak = 1708 * Math.exp(-(dSeorak * dSeorak) * 2.2);
+    return Math.max(base, seorak);
+  }
+
+  const adaptive = TerrainOptimizer.buildOptimizedTerrainGeometry({
+    mapWidth: 104,
+    mapDepth: 96,
+    bounds,
+    sampleHeightMeters: sampleGangneungMeters,
+    regionId: 'gangneung',
+    quality: 'adaptive'
+  });
+
+  assert.equal(adaptive.stats.cols, 384);
+  assert.equal(adaptive.stats.rows, 384);
+  assert.ok(adaptive.stats.triangleCount < adaptive.stats.uniformTriangles);
+  assert.ok(adaptive.stats.reductionRatio > 0.35, `expected >35% reduction, got ${(adaptive.stats.reductionRatio * 100).toFixed(1)}%`);
+  assert.ok(adaptive.stats.coastLeafCount > 0);
+
+  // Verify watertightness (every edge count is 1 on outer border or 2 on interior)
+  const { uvs, indices } = adaptive;
+  const edgeCounts = new Map<string, number>();
+  for (let t = 0; t < indices.length; t += 3) {
+    const i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2];
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]] as [number, number][]) {
+      const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    }
+  }
+  for (const [key, count] of edgeCounts.entries()) {
+    assert.ok(count === 1 || count === 2, `Non-manifold edge ${key} has count ${count}`);
+    if (count === 1) {
+      const [a, b] = key.split('_').map(Number);
+      const ua = uvs[a * 2], va = uvs[a * 2 + 1];
+      const ub = uvs[b * 2], vb = uvs[b * 2 + 1];
+      const eps = 1e-6;
+      const onOuter =
+        (Math.abs(ua) < eps && Math.abs(ub) < eps) ||
+        (Math.abs(ua - 1) < eps && Math.abs(ub - 1) < eps) ||
+        (Math.abs(va) < eps && Math.abs(vb) < eps) ||
+        (Math.abs(va - 1) < eps && Math.abs(vb - 1) < eps);
+      assert.ok(onOuter, `Interior T-junction crack on gangneung edge ${key}`);
+    }
+  }
+});
+
+test('ClimateData provides valid 12-month climatological normals and summaries for all 4 regions', () => {
+  const regionIds = ['jeju', 'haeundae', 'incheon', 'gangneung'] as const;
+  for (const id of regionIds) {
+    const profile = ClimateData.getClimateProfile(id);
+    assert.equal(profile.regionId, id);
+    assert.ok(profile.stationName.length > 0);
+    assert.ok(profile.climateType.length > 0);
+    assert.ok(profile.bestSeason.length > 0);
+    assert.ok(profile.note.length > 0);
+    assert.equal(profile.monthly.length, 12);
+
+    profile.monthly.forEach((m: any, idx: number) => {
+      assert.equal(m.month, idx + 1);
+      assert.equal(m.label, `${idx + 1}월`);
+      assert.ok(m.minTempC <= m.avgTempC && m.avgTempC <= m.maxTempC, `${id} month ${m.month} temp ordering invalid`);
+      assert.ok(m.precipMm >= 0, `${id} month ${m.month} precip negative`);
+      assert.ok(m.sunshineHrs > 0 && m.sunshineHrs <= 350, `${id} month ${m.month} sunshine out of range`);
+      assert.ok(m.humidityPct >= 0 && m.humidityPct <= 100, `${id} month ${m.month} humidity out of range`);
+      assert.ok(m.seaTempC > 0 && m.seaTempC < 35, `${id} month ${m.month} seaTemp out of range`);
+      assert.ok(m.windMs > 0 && m.windMs < 20, `${id} month ${m.month} wind out of range`);
+    });
+
+    const summary = ClimateData.computeClimateSummary(profile);
+    assert.ok(summary.annualMeanTempC > 10 && summary.annualMeanTempC < 20);
+    assert.ok(summary.annualPrecipMm > 800 && summary.annualPrecipMm < 2200);
+    assert.ok(summary.annualSunshineHrs > 1500 && summary.annualSunshineHrs < 2600);
+    assert.ok(summary.hottestMonth && summary.hottestMonth.month === 8);
+    assert.ok(summary.coldestMonth && summary.coldestMonth.month === 1);
+  }
+
+  const jejuSummary = ClimateData.computeClimateSummary('jeju');
+  const incheonSummary = ClimateData.computeClimateSummary('incheon');
+  const gangneungSummary = ClimateData.computeClimateSummary('gangneung');
+  assert.ok(jejuSummary.annualMeanTempC > incheonSummary.annualMeanTempC, 'Jeju should have warmer annual mean temp than Incheon');
+  assert.equal(gangneungSummary.wettestMonth.month, 8, 'Gangneung peak precipitation should occur in August');
+});
+
+test('cleanState and share URL params persist climateOverlayOpen and climateChartMode mutually exclusively with elevationProfileOpen', () => {
+  const cleaned = cleanState({
+    markers: [],
+    climateOverlayOpen: true,
+    climateChartMode: 'sunshine',
+    elevationProfileOpen: false
+  });
+  assert.equal(cleaned.climateOverlayOpen, true);
+  assert.equal(cleaned.climateChartMode, 'sunshine');
+  assert.equal(cleaned.elevationProfileOpen, false);
+
+  const fallback = cleanState({
+    markers: [],
+    climateOverlayOpen: true,
+    climateChartMode: 'invalid-mode',
+    elevationProfileOpen: true
+  });
+  assert.equal(fallback.climateOverlayOpen, false);
+  assert.equal(fallback.climateChartMode, 'overview');
+  assert.equal(fallback.elevationProfileOpen, true);
+
+  const shareUrl = buildShareUrl('/', {
+    region: 'gangneung',
+    climateOverlayOpen: true,
+    climateChartMode: 'marine'
+  });
+  const decoded = parseShareParams(new URL(shareUrl).search);
+  assert.equal(decoded.region, 'gangneung');
+  assert.equal(decoded.climateOverlayOpen, true);
+  assert.equal(decoded.climateChartMode, 'marine');
+});
+
+
 

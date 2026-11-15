@@ -93,6 +93,33 @@
       defaultCamDistance: 170,
       customDefaults: { latMin: 37.330, latMax: 37.560, latPlaceholder: '37.4602', lngMin: 126.350, lngMax: 126.750, lngPlaceholder: '126.4407' },
       presets: window.INCHEON_PRESETS || []
+    },
+    gangneung: {
+      id: 'gangneung',
+      name: '강릉·경포',
+      subTitle: '경포대·바다·설악산',
+      brandTitle: 'GANGNEUNG STUDIO',
+      brandSub: '강릉 경포대·동해·설악산 3D 지도',
+      brandMark: 'G',
+      brandColor: '#0f766e',
+      storageKey: 'gangneung-studio-plan-v1',
+      sidebarEyebrow: 'EAST SEA & BAEKDUDAEGAN',
+      sidebarTitle: '경포대와 바다,<br>멀리 설악산을 조망하세요.',
+      sidebarDesc: '경포호와 경포대 누각, 푸른 동해 바다를 가까이 두고, 북서쪽 능선 너머 우뚝 솟은 설악산 대청봉까지 한눈에 탐색해 보세요.',
+      viewerTitle: 'Gyeongpodae & Seoraksan',
+      viewerSub: '대한민국 강원특별자치도 · 북위 37.80°',
+      summaryTitle: '나만의 강릉·설악 지도',
+      bounds: { west: 128.360, south: 37.620, east: 129.060, north: 38.225 },
+      mapWidth: 106,
+      mapDepth: 112,
+      heightFactor: 0.0098,
+      droneAltitudeMeters: 130,
+      oceanBox: [124, 1.1, 130],
+      oceanRimBox: [126, 0.65, 132],
+      lightPos: [-35, 85, 45],
+      defaultCamDistance: 170,
+      customDefaults: { latMin: 37.620, latMax: 38.225, latPlaceholder: '37.7935', lngMin: 128.360, lngMax: 129.060, lngPlaceholder: '128.8885' },
+      presets: window.GANGNEUNG_PRESETS || []
     }
   };
 
@@ -118,6 +145,8 @@
     solarLiveSync: false,
     elevationProfileOpen: false,
     elevationTransectMode: 'west-east',
+    climateOverlayOpen: false,
+    climateChartMode: 'overview',
     terrainDetail: 'adaptive'
   });
 
@@ -158,6 +187,8 @@
       solarLiveSync: Boolean(raw.solarLiveSync),
       elevationProfileOpen: Boolean(raw.elevationProfileOpen),
       elevationTransectMode: ['west-east', 'north-south', 'places-route'].includes(raw.elevationTransectMode) ? raw.elevationTransectMode : 'west-east',
+      climateOverlayOpen: Boolean(raw.climateOverlayOpen) && !Boolean(raw.elevationProfileOpen),
+      climateChartMode: ['overview', 'sunshine', 'marine'].includes(raw.climateChartMode) ? raw.climateChartMode : 'overview',
       terrainDetail: ['adaptive', 'high', 'eco'].includes(raw.terrainDetail) ? raw.terrainDetail : 'adaptive'
     };
   }
@@ -223,11 +254,22 @@
 
       if (params.has('elev')) {
         state.elevationProfileOpen = params.get('elev') === '1' || params.get('elev') === 'true';
+        if (state.elevationProfileOpen) state.climateOverlayOpen = false;
       }
 
       if (params.has('transect')) {
         const tr = params.get('transect');
         if (['west-east', 'north-south', 'places-route'].includes(tr)) state.elevationTransectMode = tr;
+      }
+
+      if (params.has('climate')) {
+        state.climateOverlayOpen = params.get('climate') === '1' || params.get('climate') === 'true';
+        if (state.climateOverlayOpen) state.elevationProfileOpen = false;
+      }
+
+      if (params.has('cmode')) {
+        const cm = params.get('cmode');
+        if (['overview', 'sunshine', 'marine'].includes(cm)) state.climateChartMode = cm;
       }
 
       if (params.has('places') || params.has('custom')) {
@@ -308,9 +350,10 @@
   let windGain = null;
   let ambientNoiseNode = null;
 
-  // Incheon Bridge, Airport & Night Stars & Elevation Indicator
+  // Incheon Bridge, Airport, Gangneung Landmarks & Night Stars & Elevation Indicator
   let incheonBridgeGroup = null;
   let incheonAirportGroup = null;
+  let gangneungLandmarksGroup = null;
   let airportAnimPlane = null;
   let airportFlightCurve = null;
   let airportFlightPhase = 0;
@@ -395,6 +438,7 @@
     if (currentRegionId === 'jeju') return window.JEJU_OUTLINE;
     if (currentRegionId === 'haeundae') return window.HAEUNDAE_OUTLINE;
     if (currentRegionId === 'incheon') return window.INCHEON_OUTLINE;
+    if (currentRegionId === 'gangneung') return window.GANGNEUNG_OUTLINE;
     return [];
   }
 
@@ -414,6 +458,11 @@
         tags: { highway: road.type, name: road.name },
         geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
       })) : [];
+    } else if (currentRegionId === 'gangneung') {
+      return Array.isArray(window.GANGNEUNG_ROADS) ? window.GANGNEUNG_ROADS.map((road) => ({
+        tags: { highway: road.type, name: road.name },
+        geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
+      })) : [];
     }
     return [];
   }
@@ -426,6 +475,9 @@
       if (lng >= 126.600 && lng <= 126.675 && lat >= 37.360 && lat <= 37.415) return true; // Songdo
       if ((lng >= 126.605 && lat >= 37.415) || (lng >= 126.640 && lat >= 37.340)) return true; // Mainland
       return false;
+    }
+    if (currentRegionId === 'gangneung' && typeof window.inGangneungLand === 'function') {
+      return window.inGangneungLand(lng, lat);
     }
     const outline = getOutline();
     if (!outline || !outline.length) return true;
@@ -463,7 +515,11 @@
     const h10 = pixels[index(y0, x0 + 1)];
     const h01 = pixels[index(y0 + 1, x0)];
     const h11 = pixels[index(y0 + 1, x0 + 1)];
-    const maxMeters = currentRegionId === 'jeju' ? 2000 : (currentRegionId === 'haeundae' ? 650 : 300);
+    const maxMeters = currentRegionId === 'jeju'
+      ? 2000
+      : (currentRegionId === 'haeundae'
+        ? 650
+        : (currentRegionId === 'gangneung' ? 1800 : 300));
     return ((h00 * (1 - dx) + h10 * dx) * (1 - dy) +
       (h01 * (1 - dx) + h11 * dx) * dy) / 255 * maxMeters;
   }
@@ -617,6 +673,19 @@
     });
     if (state.elevationProfileOpen) updateElevationProfile();
 
+    // Yearly Climate Overlay UI Sync
+    const climatePanel = $('#climate-overlay-panel');
+    if (climatePanel) climatePanel.hidden = !state.climateOverlayOpen;
+    const climateToggleBtn = $('#climate-toggle');
+    if (climateToggleBtn) {
+      climateToggleBtn.classList.toggle('is-active', state.climateOverlayOpen);
+      climateToggleBtn.setAttribute('aria-pressed', String(state.climateOverlayOpen));
+    }
+    document.querySelectorAll('.climate-mode-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.climateMode === state.climateChartMode);
+    });
+    if (state.climateOverlayOpen) updateClimateOverlay();
+
     const cache = regionCaches[currentRegionId];
     if (terrain && cache && cache.textures) {
       if (renderedTerrainDetail !== state.terrainDetail) {
@@ -681,6 +750,34 @@
       button.setAttribute('aria-selected', String(active));
       $(`#panel-${button.dataset.tab}`).hidden = !active;
     });
+    const drawerOpen = $('#sidebar')?.classList.contains('is-open');
+    document.querySelectorAll('.rail-tab-btn').forEach((button) => {
+      button.classList.toggle('is-active', Boolean(drawerOpen) && button.dataset.railTab === tab);
+    });
+  }
+
+  function setLnbOpen(open, targetTab) {
+    const sidebar = $('#sidebar');
+    const backdrop = $('#lnb-backdrop');
+    const toggleBtn = $('#lnb-toggle');
+    if (!sidebar) return;
+
+    const nextOpen = Boolean(open);
+    sidebar.classList.toggle('is-open', nextOpen);
+    sidebar.setAttribute('aria-hidden', String(!nextOpen));
+    if (backdrop) backdrop.hidden = !nextOpen;
+    if (toggleBtn) {
+      toggleBtn.setAttribute('aria-expanded', String(nextOpen));
+      toggleBtn.setAttribute('aria-label', nextOpen ? '좌측 메뉴 닫기' : '좌측 메뉴 열기');
+    }
+    if (targetTab) {
+      setTab(targetTab);
+    } else {
+      const activeTab = document.querySelector('.panel-tab.is-active')?.dataset.tab || 'places';
+      document.querySelectorAll('.rail-tab-btn').forEach((button) => {
+        button.classList.toggle('is-active', nextOpen && button.dataset.railTab === activeTab);
+      });
+    }
   }
 
   function setPickingLocation(enabled) {
@@ -749,6 +846,13 @@
       url.searchParams.set('elev', '1');
       if (state.elevationTransectMode && state.elevationTransectMode !== 'west-east') {
         url.searchParams.set('transect', state.elevationTransectMode);
+      }
+    }
+
+    if (state.climateOverlayOpen) {
+      url.searchParams.set('climate', '1');
+      if (state.climateChartMode && state.climateChartMode !== 'overview') {
+        url.searchParams.set('cmode', state.climateChartMode);
       }
     }
 
@@ -828,9 +932,17 @@
     const aspect = Math.max(0.4, viewer.clientWidth / Math.max(1, viewer.clientHeight));
     const distance = Math.max(r.defaultCamDistance, (r.mapWidth * 0.62) / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * aspect));
     camera.up.set(0, mode === 'top' ? 0 : 1, mode === 'top' ? -1 : 0);
-    controls.target.set(0, -15, 0);
-    if (mode === 'top') camera.position.set(0, distance - 17, 0.01);
-    else camera.position.set(distance * 0.45, distance * 0.53 - 17, distance * 0.72);
+    if (mode === 'top') {
+      controls.target.set(0, -15, 0);
+      camera.position.set(0, distance - 17, 0.01);
+    } else if (currentRegionId === 'gangneung') {
+      // Frame Gyeongpodae, Gyeongpo Lake & East Sea coast in the foreground with distant Seoraksan rising on the NW skyline
+      controls.target.set(6, -11, 2);
+      camera.position.set(distance * 0.44, distance * 0.34 - 16, distance * 0.62);
+    } else {
+      controls.target.set(0, -15, 0);
+      camera.position.set(distance * 0.45, distance * 0.53 - 17, distance * 0.72);
+    }
     camera.lookAt(controls.target);
     controls.update();
     document.querySelectorAll('.view-tools [data-action]').forEach((button) => {
@@ -931,12 +1043,24 @@
     $('#brand-mark').style.background = r.brandColor;
     $('#brand-title').textContent = r.brandTitle;
     $('#brand-sub').textContent = r.brandSub;
+    const lnbMark = $('#lnb-brand-mark');
+    if (lnbMark) {
+      lnbMark.textContent = r.brandMark;
+      lnbMark.style.background = r.brandColor;
+    }
+    const lnbTitle = $('#lnb-brand-title');
+    if (lnbTitle) lnbTitle.textContent = r.brandTitle;
 
-    // GNB Tab state
+    // LNB Destination state (Drawer + Rail)
     document.querySelectorAll('.dest-tab').forEach((tab) => {
       const active = tab.dataset.region === r.id;
       tab.classList.toggle('is-active', active);
       tab.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('.rail-dest-btn').forEach((btn) => {
+      const active = btn.dataset.region === r.id;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-pressed', String(active));
     });
 
     // Sidebar text
@@ -944,13 +1068,14 @@
     $('#sidebar-title').innerHTML = r.sidebarTitle;
     $('#sidebar-desc').textContent = r.sidebarDesc;
     const kicker = $('#sidebar-kicker');
-    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : (r.id === 'haeundae' ? 'EXPLORE HAEUNDAE' : 'EXPLORE INCHEON');
+    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : (r.id === 'haeundae' ? 'EXPLORE HAEUNDAE' : (r.id === 'gangneung' ? 'EXPLORE GANGNEUNG' : 'EXPLORE INCHEON'));
     const styleLead = $('#panel-lead-style');
-    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : (r.id === 'haeundae' ? '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.' : '영종도 백운산과 송도, 인천대교의 높낮이를 살펴보세요.');
+    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : (r.id === 'haeundae' ? '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.' : (r.id === 'gangneung' ? '경포호와 동해 해안, 멀리 설악산 대청봉 능선의 고도를 살펴보세요.' : '영종도 백운산과 송도, 인천대교의 높낮이를 살펴보세요.'));
     const customName = $('#custom-name');
-    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : (r.id === 'haeundae' ? '예: 나만의 해운대 장소' : '예: 나만의 인천 장소');
+    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : (r.id === 'haeundae' ? '예: 나만의 해운대 장소' : (r.id === 'gangneung' ? '예: 나만의 강릉·설악 장소' : '예: 나만의 인천 장소'));
 
-    // Viewer badges
+    // Viewer badges & aria-label
+    if (viewer) viewer.setAttribute('aria-label', `${r.name} 3D 지도`);
     $('#viewer-region-name').textContent = r.viewerTitle;
     $('#viewer-region-coord').textContent = r.viewerSub;
     $('#bottom-summary-title').textContent = r.summaryTitle;
@@ -971,14 +1096,27 @@
 
   async function switchRegion(newRegionId) {
     if (newRegionId === currentRegionId) return;
+    const prevClimateOpen = Boolean(state.climateOverlayOpen);
+    const prevClimateMode = state.climateChartMode || 'overview';
+    const prevElevOpen = Boolean(state.elevationProfileOpen);
+    const prevElevMode = state.elevationTransectMode || 'west-east';
     persist(); // Save current region state first
 
     currentRegionId = newRegionId;
     const r = getRegion();
     applyRegionUI();
 
-    // Load state for the new region
+    // Load state for the new region, keeping active chart overlays open for direct regional comparison
     state = loadState(r);
+    if (prevClimateOpen) {
+      state.climateOverlayOpen = true;
+      state.climateChartMode = prevClimateMode;
+      state.elevationProfileOpen = false;
+    } else if (prevElevOpen) {
+      state.elevationProfileOpen = true;
+      state.elevationTransectMode = prevElevMode;
+      state.climateOverlayOpen = false;
+    }
     undoStack.length = 0;
     redoStack.length = 0;
 
@@ -1003,13 +1141,32 @@
   }
 
   function initUI() {
-    // Destination Tabs in GNB
-    document.querySelectorAll('.dest-tab').forEach((button) => {
+    // Destination Tabs in Offcanvas LNB + Slim Rail
+    document.querySelectorAll('.dest-tab, .rail-dest-btn').forEach((button) => {
       button.addEventListener('click', () => {
         const dest = button.dataset.region;
         if (dest) switchRegion(dest);
       });
     });
+
+    document.querySelectorAll('.rail-tab-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const tab = button.dataset.railTab;
+        if (!tab) return;
+        const isOpen = $('#sidebar')?.classList.contains('is-open');
+        const activeTab = document.querySelector('.panel-tab.is-active')?.dataset.tab;
+        if (isOpen && activeTab === tab) {
+          setLnbOpen(false);
+        } else {
+          setLnbOpen(true, tab);
+        }
+      });
+    });
+
+    const railOpenBtn = $('#rail-open-plan');
+    if (railOpenBtn) railOpenBtn.addEventListener('click', () => $('#plan-file').click());
+    const railResetBtn = $('#rail-reset-plan');
+    if (railResetBtn) railResetBtn.addEventListener('click', () => $('#reset-plan')?.click());
 
     document.querySelectorAll('.panel-tab').forEach((button) => {
       button.addEventListener('click', () => setTab(button.dataset.tab));
@@ -1040,6 +1197,7 @@
       if (removeButton) removeMarker(removeButton.dataset.remove);
     });
     $('#pick-location').addEventListener('click', () => {
+      setLnbOpen(false);
       setPickingLocation(true);
       showToast('지도 위를 클릭해 원하는 위치를 지정하세요.');
     });
@@ -1201,7 +1359,11 @@
     const elevToggleBtn = $('#elevation-toggle');
     if (elevToggleBtn) {
       elevToggleBtn.addEventListener('click', () => {
-        commit(() => { state.elevationProfileOpen = !state.elevationProfileOpen; });
+        commit(() => {
+          const nextOpen = !state.elevationProfileOpen;
+          state.elevationProfileOpen = nextOpen;
+          if (nextOpen) state.climateOverlayOpen = false;
+        });
       });
     }
 
@@ -1216,6 +1378,34 @@
       btn.addEventListener('click', () => {
         const mode = btn.dataset.transect;
         commit(() => { state.elevationTransectMode = mode; });
+      });
+    });
+
+    // Yearly Climate Overlay Controls
+    const climateToggleBtn = $('#climate-toggle');
+    if (climateToggleBtn) {
+      climateToggleBtn.addEventListener('click', () => {
+        commit(() => {
+          const nextOpen = !state.climateOverlayOpen;
+          state.climateOverlayOpen = nextOpen;
+          if (nextOpen) state.elevationProfileOpen = false;
+        });
+      });
+    }
+
+    const climateCloseBtn = $('#climate-close-btn');
+    if (climateCloseBtn) {
+      climateCloseBtn.addEventListener('click', () => {
+        commit(() => { state.climateOverlayOpen = false; });
+      });
+    }
+
+    document.querySelectorAll('.climate-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.climateMode;
+        if (['overview', 'sunshine', 'marine'].includes(mode)) {
+          commit(() => { state.climateChartMode = mode; });
+        }
       });
     });
 
@@ -1306,13 +1496,25 @@
         if (action === 'zoom-out') zoom(1.22);
       });
     });
-    $('#mobile-menu').addEventListener('click', () => {
-      const open = $('#sidebar').classList.toggle('is-open');
-      $('#mobile-menu').setAttribute('aria-expanded', String(open));
-      $('#mobile-menu').setAttribute('aria-label', open ? '편집 메뉴 닫기' : '편집 메뉴 열기');
+    const lnbToggle = $('#lnb-toggle');
+    if (lnbToggle) {
+      lnbToggle.addEventListener('click', () => {
+        const isOpen = $('#sidebar')?.classList.contains('is-open');
+        setLnbOpen(!isOpen);
+      });
+    }
+    const lnbClose = $('#lnb-close');
+    if (lnbClose) lnbClose.addEventListener('click', () => setLnbOpen(false));
+    const lnbBackdrop = $('#lnb-backdrop');
+    if (lnbBackdrop) lnbBackdrop.addEventListener('click', () => setLnbOpen(false));
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && $('#sidebar')?.classList.contains('is-open')) {
+        setLnbOpen(false);
+      }
     });
     applyRegionUI();
     renderState();
+    setLnbOpen(false);
   }
 
   function loadImage(url) {
@@ -1341,6 +1543,8 @@
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     renderer.setSize(width, height);
+    if (state.elevationProfileOpen) updateElevationProfile();
+    if (state.climateOverlayOpen) updateClimateOverlay();
   }
 
   async function prepareRegionAssets(regionId) {
@@ -1456,6 +1660,40 @@
         heightData,
         textures: { natural, elevation, normal, roughness }
       };
+    } else if (regionId === 'gangneung') {
+      if (typeof window.createGangneungAssets !== 'function') {
+        throw new Error('강릉·설악산 3D 에셋 생성기를 찾을 수 없습니다.');
+      }
+      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas, roughnessCanvas } = window.createGangneungAssets();
+      const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
+      const heightData = {
+        width: heightCanvas.width,
+        height: heightCanvas.height,
+        pixels: hCtx.getImageData(0, 0, heightCanvas.width, heightCanvas.height).data
+      };
+
+      const natural = new THREE.CanvasTexture(naturalCanvas);
+      natural.encoding = THREE.sRGBEncoding;
+      natural.anisotropy = maxAniso;
+
+      const elevation = new THREE.CanvasTexture(elevationCanvas);
+      elevation.encoding = THREE.sRGBEncoding;
+      elevation.anisotropy = maxAniso;
+
+      let normal, roughness;
+      if (normalCanvas) {
+        normal = new THREE.CanvasTexture(normalCanvas);
+        normal.anisotropy = maxAniso;
+      }
+      if (roughnessCanvas) {
+        roughness = new THREE.CanvasTexture(roughnessCanvas);
+        roughness.anisotropy = maxAniso;
+      }
+
+      regionCaches.gangneung = {
+        heightData,
+        textures: { natural, elevation, normal, roughness }
+      };
     }
 
     return regionCaches[regionId];
@@ -1498,14 +1736,20 @@
     baseMesh.receiveShadow = true;
     scene.add(baseMesh);
 
-    const points = outline.map(([lng, lat]) => {
+    const shoreOutline = currentRegionId === 'gangneung' ? outline.slice(0, 21) : outline;
+    const points = shoreOutline.map(([lng, lat]) => {
       const { x, z } = worldPosition(lat, lng);
       return new THREE.Vector3(x, 0.12, z);
     });
-    shoreline = new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({ color: 0xf5fbfb, transparent: true, opacity: 0.85 })
-    );
+    shoreline = currentRegionId === 'gangneung'
+      ? new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(points),
+          new THREE.LineBasicMaterial({ color: 0xf5fbfb, transparent: true, opacity: 0.88 })
+        )
+      : new THREE.LineLoop(
+          new THREE.BufferGeometry().setFromPoints(points),
+          new THREE.LineBasicMaterial({ color: 0xf5fbfb, transparent: true, opacity: 0.85 })
+        );
     scene.add(shoreline);
   }
 
@@ -1596,6 +1840,7 @@
     renderedHeightScale = state.heightScale;
     buildRoads();
     if (currentRegionId === 'incheon') buildIncheonAirport();
+    if (currentRegionId === 'gangneung') buildGangneungLandmarks();
   }
 
   function roadColor(type) {
@@ -1718,13 +1963,26 @@
     if (!camera || !state.showLabels) return;
     const width = viewer.clientWidth;
     const height = viewer.clientHeight;
+    const placed = [];
     for (const { group, label } of markerObjects) {
       const point = new THREE.Vector3(group.position.x, group.position.y + 2.9, group.position.z).project(camera);
       const x = (point.x * 0.5 + 0.5) * width;
-      const y = (-point.y * 0.5 + 0.5) * height;
-      label.style.left = `${x}px`;
-      label.style.top = `${y}px`;
-      label.hidden = point.z < -1 || point.z > 1 || x < 5 || x > width - 5 || y < 20 || y > height - 80;
+      let y = (-point.y * 0.5 + 0.5) * height;
+      const isHidden = point.z < -1 || point.z > 1 || x < 5 || x > width - 5 || y < 20 || y > height - 80;
+      label.hidden = isHidden;
+      if (!isHidden) {
+        const w = label.offsetWidth || 126;
+        const h = label.offsetHeight || 28;
+        for (let iter = 0; iter < 5; iter++) {
+          const hit = placed.find((p) => Math.abs(x - p.x) < (w + p.w) * 0.5 + 8 && Math.abs(y - p.y) < (h + p.h) * 0.5 + 6);
+          if (!hit) break;
+          y = hit.y - (h + 8);
+        }
+        y = Math.max(26, y);
+        placed.push({ x, y, w, h });
+        label.style.left = `${x}px`;
+        label.style.top = `${y}px`;
+      }
     }
   }
 
@@ -2190,6 +2448,7 @@
     buildRoads();
     buildIncheonBridge();
     buildIncheonAirport();
+    buildGangneungLandmarks();
     syncMarkers();
     resetWeatherBounds();
   }
@@ -2941,6 +3200,148 @@
     scene.add(incheonAirportGroup);
   }
 
+  function buildGangneungLandmarks() {
+    if (gangneungLandmarksGroup) {
+      disposeObject(gangneungLandmarksGroup);
+      gangneungLandmarksGroup = null;
+    }
+    if (currentRegionId !== 'gangneung') return;
+
+    gangneungLandmarksGroup = new THREE.Group();
+    gangneungLandmarksGroup.name = 'gangneung-landmarks';
+
+    // 1. Gyeongpodae Pavilion (경포대 누각) - composite 3D Korean pavilion perched on hillside overlooking Gyeongpo Lake
+    const gpCoord = worldPosition(37.7935, 128.8885);
+    const gpY = surfaceHeight(37.7935, 128.8885) + 0.04;
+    const pavilion = new THREE.Group();
+    pavilion.position.set(gpCoord.x, gpY, gpCoord.z);
+    pavilion.rotation.y = 0.45; // Face East-Northeast toward Gyeongpo Lake & East Sea sunrise
+
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0xd6d3cd, roughness: 0.88, metalness: 0.04 });
+    const woodDeckMat = new THREE.MeshStandardMaterial({ color: 0x825334, roughness: 0.78, metalness: 0.05 });
+    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x9b2d2b, roughness: 0.65, metalness: 0.05 });
+    const roofTileMat = new THREE.MeshStandardMaterial({ color: 0x2b333f, roughness: 0.62, metalness: 0.14 });
+    const ridgeGoldMat = new THREE.MeshStandardMaterial({ color: 0xd9a441, roughness: 0.35, metalness: 0.25 });
+
+    // Granite foundation plinth (2 stepped tiers)
+    const plinthLow = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.34, 1.8), stoneMat);
+    plinthLow.position.y = 0.17;
+    plinthLow.castShadow = true;
+    plinthLow.receiveShadow = true;
+    pavilion.add(plinthLow);
+
+    const plinthTop = new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.24, 1.48), woodDeckMat);
+    plinthTop.position.y = 0.46;
+    plinthTop.castShadow = true;
+    pavilion.add(plinthTop);
+
+    // Timber veranda railing frame
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.12, 1.42), woodDeckMat);
+    rail.position.y = 0.72;
+    pavilion.add(rail);
+
+    // 8 traditional pillars around perimeter
+    const pillarGeo = new THREE.CylinderGeometry(0.06, 0.07, 0.72, 8);
+    const pxOffsets = [-0.84, -0.28, 0.28, 0.84];
+    const pzOffsets = [-0.56, 0.56];
+    pxOffsets.forEach((px) => {
+      pzOffsets.forEach((pz) => {
+        const col = new THREE.Mesh(pillarGeo, pillarMat);
+        col.position.set(px, 0.92, pz);
+        col.castShadow = true;
+        pavilion.add(col);
+      });
+    });
+
+    // Lower flared eaves cornice
+    const eaves = new THREE.Mesh(new THREE.BoxGeometry(2.58, 0.15, 1.86), roofTileMat);
+    eaves.position.y = 1.32;
+    eaves.castShadow = true;
+    pavilion.add(eaves);
+
+    // Upper hipped/gable Korean giwa roof (Paljak-jibung)
+    const upperRoof = new THREE.Mesh(new THREE.ConeGeometry(1.6, 0.74, 4), roofTileMat);
+    upperRoof.position.y = 1.74;
+    upperRoof.rotation.y = Math.PI / 4;
+    upperRoof.scale.set(1.18, 1.0, 0.86);
+    upperRoof.castShadow = true;
+    pavilion.add(upperRoof);
+
+    // Roof ridge beam (Yongmaru) & ornamental finials
+    const ridgeBeam = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.12, 0.13), ridgeGoldMat);
+    ridgeBeam.position.y = 2.08;
+    pavilion.add(ridgeBeam);
+
+    gangneungLandmarksGroup.add(pavilion);
+
+    // 2. Wolpagyo Arched Timber Bridge across Gyeongpo Lagoon
+    const brStart = worldPosition(37.7968, 128.8942);
+    const brEnd = worldPosition(37.8018, 128.9008);
+    const brY = surfaceHeight(37.7992, 128.8975) + 0.06;
+    const bridgeCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(brStart.x, brY, brStart.z),
+      new THREE.Vector3((brStart.x + brEnd.x) * 0.5, brY + 0.42, (brStart.z + brEnd.z) * 0.5),
+      new THREE.Vector3(brEnd.x, brY, brEnd.z)
+    ]);
+    const bridgeDeckGeo = new THREE.TubeGeometry(bridgeCurve, 16, 0.18, 6, false);
+    bridgeDeckGeo.scale(1, 0.35, 1);
+    const bridgeMesh = new THREE.Mesh(
+      bridgeDeckGeo,
+      new THREE.MeshStandardMaterial({ color: 0x9c6b49, roughness: 0.72, metalness: 0.06 })
+    );
+    bridgeMesh.castShadow = true;
+    gangneungLandmarksGroup.add(bridgeMesh);
+
+    // 3. East Sea Coastal Lighthouses (Anmok, Jumunjin, Hajodae)
+    const lighthouses = [
+      { lat: 37.7715, lng: 128.9505, color: 0xffffff }, // Anmok Breakwater
+      { lat: 37.8938, lng: 128.8330, color: 0xdc2626 }, // Jumunjin Red Breakwater Lighthouse
+      { lat: 38.0185, lng: 128.7335, color: 0xffffff }  // Hajodae Cliff White Lighthouse
+    ];
+    const beaconMat = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.65,
+      roughness: 0.2
+    });
+    const capMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45, metalness: 0.2 });
+
+    lighthouses.forEach((lh) => {
+      const pos = worldPosition(lh.lat, lh.lng);
+      const baseY = Math.max(0.05, surfaceHeight(lh.lat, lh.lng));
+      const lhGroup = new THREE.Group();
+      lhGroup.position.set(pos.x, baseY, pos.z);
+
+      const pier = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.52, 0.25, 10), stoneMat);
+      pier.position.y = 0.125;
+      lhGroup.add(pier);
+
+      const tower = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.28, 1.35, 10),
+        new THREE.MeshStandardMaterial({ color: lh.color, roughness: 0.55, metalness: 0.08 })
+      );
+      tower.position.y = 0.92;
+      tower.castShadow = true;
+      lhGroup.add(tower);
+
+      const gallery = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.22, 0.09, 10), capMat);
+      gallery.position.y = 1.62;
+      lhGroup.add(gallery);
+
+      const lantern = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.22, 10), beaconMat);
+      lantern.position.y = 1.77;
+      lhGroup.add(lantern);
+
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.20, 10), capMat);
+      cap.position.y = 1.98;
+      lhGroup.add(cap);
+
+      gangneungLandmarksGroup.add(lhGroup);
+    });
+
+    scene.add(gangneungLandmarksGroup);
+  }
+
   function buildNightSkyStars() {
     if (starsPoints) disposeObject(starsPoints);
 
@@ -3547,6 +3948,419 @@
       });
   }
 
+  function updateClimateOverlay() {
+    const climateApi = window.ClimateData;
+    if (!climateApi) return;
+
+    const r = getRegion();
+    const profile = climateApi.getClimateProfile(currentRegionId);
+    const summary = climateApi.computeClimateSummary(profile);
+    const rows = profile.monthly || [];
+    const mode = ['overview', 'sunshine', 'marine'].includes(state.climateChartMode) ? state.climateChartMode : 'overview';
+
+    // Populate Header & Summary KPIs
+    const kickerEl = $('#climate-station-kicker');
+    if (kickerEl) kickerEl.textContent = `D3.js YEARLY CLIMATE · ${profile.stationName}`;
+    const titleEl = $('#climate-chart-title');
+    if (titleEl) titleEl.textContent = `${r.name} 연간 기후 데이터`;
+    const typeEl = $('#climate-type-label');
+    if (typeEl) typeEl.textContent = profile.climateType;
+    const noteEl = $('#climate-note');
+    if (noteEl) noteEl.textContent = profile.note;
+
+    const tempEl = $('#climate-stat-temp');
+    if (tempEl) tempEl.textContent = `${summary.annualMeanTempC.toFixed(1)}°C`;
+    const tempRangeEl = $('#climate-stat-temp-range');
+    if (tempRangeEl && summary.coldestMonth && summary.hottestMonth) {
+      tempRangeEl.textContent = `${summary.coldestMonth.label} ${summary.coldestMonth.avgTempC}° · ${summary.hottestMonth.label} ${summary.hottestMonth.avgTempC}°`;
+    }
+
+    const precipEl = $('#climate-stat-precip');
+    if (precipEl) precipEl.textContent = `${summary.annualPrecipMm.toLocaleString()} mm`;
+    const precipPeakEl = $('#climate-stat-precip-peak');
+    if (precipPeakEl && summary.wettestMonth) {
+      precipPeakEl.textContent = `최다 ${summary.wettestMonth.label} (${Math.round(summary.wettestMonth.precipMm)}mm)`;
+    }
+
+    const sunEl = $('#climate-stat-sun');
+    if (sunEl) sunEl.textContent = `${summary.annualSunshineHrs.toLocaleString()} hr`;
+    const humEl = $('#climate-stat-humidity');
+    if (humEl) humEl.textContent = `평균 습도 ${summary.avgHumidityPct}%`;
+
+    const seasonEl = $('#climate-stat-season');
+    if (seasonEl) seasonEl.textContent = profile.bestSeason;
+
+    const legendEl = $('#climate-legend');
+    if (legendEl) {
+      if (mode === 'overview') {
+        legendEl.innerHTML = [
+          '<span class="climate-legend-item"><span class="climate-legend-line" style="background:#dc2626;"></span>평균 기온(°C)</span>',
+          '<span class="climate-legend-item"><span class="climate-legend-swatch" style="background:rgba(239,68,68,0.22); border:1px solid rgba(239,68,68,0.45);"></span>최저–최고 범위</span>',
+          '<span class="climate-legend-item"><span class="climate-legend-swatch" style="background:#38bdf8;"></span>강수량(mm)</span>'
+        ].join('');
+      } else if (mode === 'sunshine') {
+        legendEl.innerHTML = [
+          '<span class="climate-legend-item"><span class="climate-legend-swatch" style="background:#f59e0b;"></span>일조시간(hr)</span>',
+          '<span class="climate-legend-item"><span class="climate-legend-line" style="background:#0d9488;"></span>상대습도(%)</span>'
+        ].join('');
+      } else {
+        legendEl.innerHTML = [
+          '<span class="climate-legend-item"><span class="climate-legend-line" style="background:#0284c7;"></span>연안 수온(°C)</span>',
+          '<span class="climate-legend-item"><span class="climate-legend-swatch" style="background:#6366f1;"></span>평균 풍속(m/s)</span>'
+        ].join('');
+      }
+    }
+
+    if (!window.d3 || !rows.length) return;
+
+    const svg = d3.select('#climate-chart-svg');
+    svg.selectAll('*').remove();
+
+    const svgNode = svg.node();
+    const width = svgNode ? (svgNode.clientWidth || 740) : 740;
+    const height = svgNode ? (svgNode.clientHeight || 175) : 175;
+    const margin = { top: 16, right: 48, bottom: 26, left: 46 };
+    const chartWidth = Math.max(120, width - margin.left - margin.right);
+    const chartHeight = Math.max(60, height - margin.top - margin.bottom);
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const activeMonth = (() => {
+      const m = String(state.solarDate || '').split('-')[1];
+      const num = Number(m);
+      return Number.isFinite(num) && num >= 1 && num <= 12 ? num : 11;
+    })();
+
+    const xScale = d3.scaleBand()
+      .domain(rows.map((d) => d.label))
+      .range([0, chartWidth])
+      .padding(0.28);
+
+    const bandwidth = xScale.bandwidth();
+    const step = xScale.step();
+    const cxFor = (d) => xScale(d.label) + bandwidth * 0.5;
+
+    // Active month highlight strip behind data
+    const activeRow = rows.find((d) => d.month === activeMonth);
+    if (activeRow) {
+      g.append('rect')
+        .attr('x', xScale(activeRow.label) - Math.max(3, (step - bandwidth) * 0.35))
+        .attr('y', 0)
+        .attr('width', bandwidth + Math.max(6, (step - bandwidth) * 0.7))
+        .attr('height', chartHeight)
+        .attr('rx', 5)
+        .attr('fill', 'rgba(23, 105, 193, 0.08)');
+    }
+
+    let yLeftScale;
+    let yRightScale;
+    let leftTickFmt;
+    let rightTickFmt;
+    let leftColor = '#334155';
+    let rightColor = '#0284c7';
+
+    const defs = svg.append('defs');
+
+    if (mode === 'overview') {
+      const minT = d3.min(rows, (d) => d.minTempC);
+      const maxT = d3.max(rows, (d) => d.maxTempC);
+      const padMin = Math.floor((minT - 3) / 5) * 5;
+      const padMax = Math.ceil((maxT + 3) / 5) * 5;
+      const maxP = Math.max(100, d3.max(rows, (d) => d.precipMm) * 1.18);
+
+      yLeftScale = d3.scaleLinear().domain([padMin, padMax]).range([chartHeight, 0]);
+      yRightScale = d3.scaleLinear().domain([0, maxP]).nice(4).range([chartHeight, 0]);
+      leftTickFmt = (d) => `${d}°C`;
+      rightTickFmt = (d) => `${d}mm`;
+      leftColor = '#b91c1c';
+      rightColor = '#0284c7';
+
+      // Horizontal dashed grid from left axis
+      g.append('g')
+        .attr('stroke-dasharray', '3,3')
+        .attr('opacity', 0.16)
+        .call(d3.axisLeft(yLeftScale).ticks(4).tickSize(-chartWidth).tickFormat('').tickSizeOuter(0));
+
+      // Zero Celsius baseline when winter drops below 0°C
+      if (padMin < 0 && padMax > 0) {
+        g.append('line')
+          .attr('x1', 0)
+          .attr('x2', chartWidth)
+          .attr('y1', yLeftScale(0))
+          .attr('y2', yLeftScale(0))
+          .attr('stroke', '#94a3b8')
+          .attr('stroke-width', 1)
+          .attr('stroke-dasharray', '4,3')
+          .attr('opacity', 0.7);
+      }
+
+      // Precipitation bars
+      g.selectAll('.climate-bar')
+        .data(rows)
+        .enter()
+        .append('rect')
+        .attr('class', 'climate-bar')
+        .attr('x', (d) => xScale(d.label))
+        .attr('y', (d) => yRightScale(d.precipMm))
+        .attr('width', bandwidth)
+        .attr('height', (d) => Math.max(1, chartHeight - yRightScale(d.precipMm)))
+        .attr('rx', 3)
+        .attr('fill', (d) => d.month === activeMonth ? '#0284c7' : '#7dd3fc')
+        .attr('opacity', (d) => d.month === activeMonth ? 0.88 : 0.72);
+
+      // Min-Max temperature thermal range band
+      const bandArea = d3.area()
+        .x(cxFor)
+        .y0((d) => yLeftScale(d.minTempC))
+        .y1((d) => yLeftScale(d.maxTempC))
+        .curve(d3.curveMonotoneX);
+
+      g.append('path')
+        .datum(rows)
+        .attr('fill', 'rgba(239, 68, 68, 0.17)')
+        .attr('d', bandArea);
+
+      // Average temperature curve
+      const avgLine = d3.line()
+        .x(cxFor)
+        .y((d) => yLeftScale(d.avgTempC))
+        .curve(d3.curveMonotoneX);
+
+      g.append('path')
+        .datum(rows)
+        .attr('fill', 'none')
+        .attr('stroke', '#dc2626')
+        .attr('stroke-width', 2.4)
+        .attr('d', avgLine);
+
+      g.selectAll('.climate-temp-dot')
+        .data(rows)
+        .enter()
+        .append('circle')
+        .attr('cx', cxFor)
+        .attr('cy', (d) => yLeftScale(d.avgTempC))
+        .attr('r', (d) => d.month === activeMonth ? 4.5 : 3)
+        .attr('fill', (d) => d.month === activeMonth ? '#991b1b' : '#dc2626')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 1.4);
+    } else if (mode === 'sunshine') {
+      const maxSun = Math.max(240, d3.max(rows, (d) => d.sunshineHrs) * 1.15);
+      yLeftScale = d3.scaleLinear().domain([0, maxSun]).nice(4).range([chartHeight, 0]);
+      yRightScale = d3.scaleLinear().domain([35, 95]).range([chartHeight, 0]);
+      leftTickFmt = (d) => `${d}h`;
+      rightTickFmt = (d) => `${d}%`;
+      leftColor = '#b45309';
+      rightColor = '#0f766e';
+
+      g.append('g')
+        .attr('stroke-dasharray', '3,3')
+        .attr('opacity', 0.16)
+        .call(d3.axisLeft(yLeftScale).ticks(4).tickSize(-chartWidth).tickFormat('').tickSizeOuter(0));
+
+      // Sunshine hour bars
+      g.selectAll('.climate-sun-bar')
+        .data(rows)
+        .enter()
+        .append('rect')
+        .attr('x', (d) => xScale(d.label))
+        .attr('y', (d) => yLeftScale(d.sunshineHrs))
+        .attr('width', bandwidth)
+        .attr('height', (d) => Math.max(1, chartHeight - yLeftScale(d.sunshineHrs)))
+        .attr('rx', 3)
+        .attr('fill', (d) => d.month === activeMonth ? '#d97706' : '#fbbf24')
+        .attr('opacity', (d) => d.month === activeMonth ? 0.88 : 0.72);
+
+      // Humidity line
+      const humLine = d3.line()
+        .x(cxFor)
+        .y((d) => yRightScale(d.humidityPct))
+        .curve(d3.curveMonotoneX);
+
+      g.append('path')
+        .datum(rows)
+        .attr('fill', 'none')
+        .attr('stroke', '#0d9488')
+        .attr('stroke-width', 2.4)
+        .attr('d', humLine);
+
+      g.selectAll('.climate-hum-dot')
+        .data(rows)
+        .enter()
+        .append('circle')
+        .attr('cx', cxFor)
+        .attr('cy', (d) => yRightScale(d.humidityPct))
+        .attr('r', (d) => d.month === activeMonth ? 4.5 : 3)
+        .attr('fill', (d) => d.month === activeMonth ? '#115e59' : '#0d9488')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 1.4);
+    } else {
+      const maxSea = Math.max(28, d3.max(rows, (d) => d.seaTempC) + 3);
+      const maxWind = Math.max(5.5, d3.max(rows, (d) => d.windMs) * 1.25);
+      yLeftScale = d3.scaleLinear().domain([0, maxSea]).nice(4).range([chartHeight, 0]);
+      yRightScale = d3.scaleLinear().domain([0, maxWind]).nice(4).range([chartHeight, 0]);
+      leftTickFmt = (d) => `${d}°C`;
+      rightTickFmt = (d) => `${d}m/s`;
+      leftColor = '#0369a1';
+      rightColor = '#4f46e5';
+
+      const seaGrad = defs.append('linearGradient')
+        .attr('id', 'climate-sea-gradient')
+        .attr('x1', '0%').attr('y1', '0%')
+        .attr('x2', '0%').attr('y2', '100%');
+      seaGrad.append('stop').attr('offset', '0%').attr('stop-color', '#0ea5e9').attr('stop-opacity', 0.34);
+      seaGrad.append('stop').attr('offset', '100%').attr('stop-color', '#0ea5e9').attr('stop-opacity', 0.03);
+
+      g.append('g')
+        .attr('stroke-dasharray', '3,3')
+        .attr('opacity', 0.16)
+        .call(d3.axisLeft(yLeftScale).ticks(4).tickSize(-chartWidth).tickFormat('').tickSizeOuter(0));
+
+      // Wind speed bars
+      g.selectAll('.climate-wind-bar')
+        .data(rows)
+        .enter()
+        .append('rect')
+        .attr('x', (d) => xScale(d.label))
+        .attr('y', (d) => yRightScale(d.windMs))
+        .attr('width', bandwidth)
+        .attr('height', (d) => Math.max(1, chartHeight - yRightScale(d.windMs)))
+        .attr('rx', 3)
+        .attr('fill', (d) => d.month === activeMonth ? '#4f46e5' : '#a5b4fc')
+        .attr('opacity', (d) => d.month === activeMonth ? 0.85 : 0.65);
+
+      const seaArea = d3.area()
+        .x(cxFor)
+        .y0(chartHeight)
+        .y1((d) => yLeftScale(d.seaTempC))
+        .curve(d3.curveMonotoneX);
+
+      g.append('path')
+        .datum(rows)
+        .attr('fill', 'url(#climate-sea-gradient)')
+        .attr('d', seaArea);
+
+      const seaLine = d3.line()
+        .x(cxFor)
+        .y((d) => yLeftScale(d.seaTempC))
+        .curve(d3.curveMonotoneX);
+
+      g.append('path')
+        .datum(rows)
+        .attr('fill', 'none')
+        .attr('stroke', '#0284c7')
+        .attr('stroke-width', 2.4)
+        .attr('d', seaLine);
+
+      g.selectAll('.climate-sea-dot')
+        .data(rows)
+        .enter()
+        .append('circle')
+        .attr('cx', cxFor)
+        .attr('cy', (d) => yLeftScale(d.seaTempC))
+        .attr('r', (d) => d.month === activeMonth ? 4.5 : 3)
+        .attr('fill', (d) => d.month === activeMonth ? '#075985' : '#0284c7')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 1.4);
+    }
+
+    // Axes
+    const xAxisG = g.append('g')
+      .attr('transform', `translate(0,${chartHeight})`)
+      .attr('color', '#64748b')
+      .attr('font-size', '11px')
+      .call(d3.axisBottom(xScale).tickSizeOuter(0));
+
+    xAxisG.selectAll('.tick text')
+      .attr('font-weight', (label) => (activeRow && activeRow.label === label ? '700' : '500'))
+      .attr('fill', (label) => (activeRow && activeRow.label === label ? '#1769c1' : '#64748b'));
+
+    g.append('g')
+      .attr('color', leftColor)
+      .attr('font-size', '10.5px')
+      .call(d3.axisLeft(yLeftScale).ticks(4).tickFormat(leftTickFmt).tickSizeOuter(0));
+
+    g.append('g')
+      .attr('transform', `translate(${chartWidth},0)`)
+      .attr('color', rightColor)
+      .attr('font-size', '10.5px')
+      .call(d3.axisRight(yRightScale).ticks(4).tickFormat(rightTickFmt).tickSizeOuter(0));
+
+    // Interactive Crosshair, Focus Dot, Tooltip & Month Click-to-Apply
+    const hoverLine = g.append('line')
+      .attr('y1', 0)
+      .attr('y2', chartHeight)
+      .attr('stroke', '#1769c1')
+      .attr('stroke-width', 1.3)
+      .attr('stroke-dasharray', '4,3')
+      .style('opacity', 0)
+      .style('pointer-events', 'none');
+
+    const hoverDot = g.append('circle')
+      .attr('r', 5.5)
+      .attr('fill', mode === 'overview' ? '#dc2626' : (mode === 'sunshine' ? '#0d9488' : '#0284c7'))
+      .attr('stroke', '#ffffff')
+      .attr('stroke-width', 2)
+      .style('opacity', 0)
+      .style('pointer-events', 'none');
+
+    const tooltip = d3.select('#climate-chart-tooltip');
+
+    g.selectAll('.climate-hit-col')
+      .data(rows)
+      .enter()
+      .append('rect')
+      .attr('class', 'climate-hit-col')
+      .attr('x', (d) => xScale(d.label) - (step - bandwidth) * 0.5)
+      .attr('y', 0)
+      .attr('width', step)
+      .attr('height', chartHeight)
+      .attr('fill', 'transparent')
+      .style('cursor', 'pointer')
+      .on('pointerenter pointermove', function(event, d) {
+        const cx = cxFor(d);
+        const cyVal = mode === 'overview'
+          ? yLeftScale(d.avgTempC)
+          : (mode === 'sunshine' ? yRightScale(d.humidityPct) : yLeftScale(d.seaTempC));
+
+        hoverLine.attr('x1', cx).attr('x2', cx).style('opacity', 1);
+        hoverDot.attr('cx', cx).attr('cy', cyVal).style('opacity', 1);
+
+        const placeRight = cx <= chartWidth * 0.6;
+        const leftPx = placeRight ? (margin.left + cx + 12) : (margin.left + cx - 12);
+        const topPx = Math.max(46, Math.min(chartHeight + margin.top - 22, margin.top + cyVal));
+
+        tooltip
+          .property('hidden', false)
+          .style('display', 'block')
+          .style('left', `${leftPx}px`)
+          .style('top', `${topPx}px`)
+          .style('transform', placeRight ? 'translate(0, -50%)' : 'translate(-100%, -50%)')
+          .html(`
+            <div style="font-weight:700; margin-bottom:2px; color:#93c5fd;">${r.name} · ${d.label}</div>
+            <div>평균 기온: <b>${d.avgTempC.toFixed(1)}°C</b> <span style="color:#cbd5e1;">(${d.minTempC.toFixed(1)}° ~ ${d.maxTempC.toFixed(1)}°C)</span></div>
+            <div>강수량: <b>${d.precipMm.toFixed(1)} mm</b> · 습도: <b>${d.humidityPct}%</b></div>
+            <div>일조: <b>${d.sunshineHrs} hr</b> · 수온: <b>${d.seaTempC.toFixed(1)}°C</b> · 풍속: <b>${d.windMs.toFixed(1)} m/s</b></div>
+          `);
+      })
+      .on('pointerleave', function() {
+        hoverLine.style('opacity', 0);
+        hoverDot.style('opacity', 0);
+        tooltip.property('hidden', true).style('display', 'none');
+      })
+      .on('click', function(event, d) {
+        const parts = String(state.solarDate || '2026-11-10').split('-');
+        const year = Number(parts[0]) || 2026;
+        const origDay = Number(parts[2]) || 15;
+        const maxDay = new Date(year, d.month, 0).getDate();
+        const clampedDay = String(Math.min(origDay, maxDay)).padStart(2, '0');
+        const mm = String(d.month).padStart(2, '0');
+        commit(() => {
+          state.solarDate = `${year}-${mm}-${clampedDay}`;
+        });
+        showToast(`${d.label} 태양·계절 조건으로 업데이트했어요.`);
+      });
+  }
+
   async function initScene() {
     if (!window.THREE || !THREE.OrbitControls) {
       throw new Error('Three.js 라이브러리를 불러오지 못했습니다.');
@@ -3647,8 +4461,7 @@
             $('#add-details').open = true;
             setTab('places');
             setPickingLocation(false);
-            $('#sidebar').classList.add('is-open');
-            $('#mobile-menu').setAttribute('aria-expanded', 'true');
+            setLnbOpen(true, 'places');
             $('#custom-name').focus();
             showToast('위치를 골랐어요. 장소 이름을 입력해 주세요.');
             return;
@@ -3702,6 +4515,7 @@
   window.closeShareDialog = closeShareDialog;
   window.shareCurrentView = shareCurrentView;
   window.focusOnMarker = focusOnMarker;
+  window.updateClimateOverlay = updateClimateOverlay;
 
   initUI();
   initScene().catch((error) => {
