@@ -844,8 +844,108 @@ test('TransectHelpers builds closed 3D Vertical Slice cut-block geometry and det
   assert.equal(sliceState.verticalSliceMode, true);
 });
 
+test('TerrainOptimizer generates watertight adaptive quadtree mesh for Busan Haeundae ridge and crescent coast', () => {
+  const bounds = REGIONS.haeundae.bounds;
+  function sampleHaeundaeMeters(lat: number, lng: number) {
+    // Ocean south of Haeundae crescent & Suyeong Bay
+    const coastLat = 35.1585 + Math.sin((lng - 129.155) * 90) * 0.0022;
+    if (lat < coastLat && !(lng > 129.150 && lng < 129.155 && lat > 35.149)) return 0;
+    const dJangsan = Math.hypot((lng - 129.1415) / 0.016, (lat - 35.1802) / 0.012);
+    const dDalmaji = Math.hypot((lng - 129.1795) / 0.012, (lat - 35.1635) / 0.008);
+    return Math.max(4.5, 634 * Math.exp(-(dJangsan * dJangsan) * 1.8) + 165 * Math.exp(-(dDalmaji * dDalmaji) * 2.1));
+  }
 
+  const adaptive = TerrainOptimizer.buildOptimizedTerrainGeometry({
+    mapWidth: 100,
+    mapDepth: 65,
+    bounds,
+    sampleHeightMeters: sampleHaeundaeMeters,
+    regionId: 'haeundae',
+    quality: 'adaptive'
+  });
 
+  assert.equal(adaptive.stats.cols, 384);
+  assert.equal(adaptive.stats.rows, 256);
+  assert.ok(adaptive.stats.triangleCount < adaptive.stats.uniformTriangles);
+  assert.ok(adaptive.stats.reductionRatio > 0.35, `expected >35% reduction for haeundae, got ${(adaptive.stats.reductionRatio * 100).toFixed(1)}%`);
+  assert.ok(adaptive.stats.coastLeafCount > 0, 'Haeundae shoreline cells should be refined');
 
+  const { uvs, indices } = adaptive;
+  const edgeCounts = new Map<string, number>();
+  for (let t = 0; t < indices.length; t += 3) {
+    const i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2];
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]] as [number, number][]) {
+      const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    }
+  }
+  for (const [key, count] of edgeCounts.entries()) {
+    assert.ok(count === 1 || count === 2, `Non-manifold haeundae edge ${key} has count ${count}`);
+    if (count === 1) {
+      const [a, b] = key.split('_').map(Number);
+      const ua = uvs[a * 2], va = uvs[a * 2 + 1];
+      const ub = uvs[b * 2], vb = uvs[b * 2 + 1];
+      const eps = 1e-6;
+      const onOuter =
+        (Math.abs(ua) < eps && Math.abs(ub) < eps) ||
+        (Math.abs(ua - 1) < eps && Math.abs(ub - 1) < eps) ||
+        (Math.abs(va) < eps && Math.abs(vb) < eps) ||
+        (Math.abs(va - 1) < eps && Math.abs(vb - 1) < eps);
+      assert.ok(onOuter, `Interior T-junction crack on haeundae edge ${key}`);
+    }
+  }
+});
 
+test('TerrainOptimizer generates watertight adaptive quadtree mesh for Incheon archipelago, airport flats, and mainland hills', () => {
+  const bounds = REGIONS.incheon.bounds;
+  function sampleIncheonMeters(lat: number, lng: number) {
+    const dYj = Math.hypot((lng - 126.480) / 0.095, (lat - 37.472) / 0.052);
+    const inSongdo = lng >= 126.610 && lng <= 126.685 && lat >= 37.350 && lat <= 37.405;
+    const inMainland = lng >= 126.630 && lat >= 37.405;
+    if (dYj >= 1.0 && !inSongdo && !inMainland) return 0;
+    if (inSongdo) return 7.2;
+    const dBaekun = Math.hypot((lng - 126.518) / 0.025, (lat - 37.498) / 0.018);
+    const dMunhak = Math.hypot((lng - 126.678) / 0.028, (lat - 37.433) / 0.016);
+    return Math.max(8.0, 255 * Math.exp(-(dBaekun * dBaekun) * 2.0) + 217 * Math.exp(-(dMunhak * dMunhak) * 2.0));
+  }
 
+  const adaptive = TerrainOptimizer.buildOptimizedTerrainGeometry({
+    mapWidth: 105,
+    mapDepth: 65,
+    bounds,
+    sampleHeightMeters: sampleIncheonMeters,
+    regionId: 'incheon',
+    quality: 'adaptive'
+  });
+
+  assert.equal(adaptive.stats.cols, 384);
+  assert.equal(adaptive.stats.rows, 256);
+  assert.ok(adaptive.stats.triangleCount < adaptive.stats.uniformTriangles);
+  assert.ok(adaptive.stats.reductionRatio > 0.40, `expected >40% reduction for incheon, got ${(adaptive.stats.reductionRatio * 100).toFixed(1)}%`);
+  assert.ok(adaptive.stats.coastLeafCount > 0, 'Incheon island/harbor coastlines should be refined');
+
+  const { uvs, indices } = adaptive;
+  const edgeCounts = new Map<string, number>();
+  for (let t = 0; t < indices.length; t += 3) {
+    const i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2];
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]] as [number, number][]) {
+      const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    }
+  }
+  for (const [key, count] of edgeCounts.entries()) {
+    assert.ok(count === 1 || count === 2, `Non-manifold incheon edge ${key} has count ${count}`);
+    if (count === 1) {
+      const [a, b] = key.split('_').map(Number);
+      const ua = uvs[a * 2], va = uvs[a * 2 + 1];
+      const ub = uvs[b * 2], vb = uvs[b * 2 + 1];
+      const eps = 1e-6;
+      const onOuter =
+        (Math.abs(ua) < eps && Math.abs(ub) < eps) ||
+        (Math.abs(ua - 1) < eps && Math.abs(ub - 1) < eps) ||
+        (Math.abs(va) < eps && Math.abs(vb) < eps) ||
+        (Math.abs(va - 1) < eps && Math.abs(vb - 1) < eps);
+      assert.ok(onOuter, `Interior T-junction crack on incheon edge ${key}`);
+    }
+  }
+});

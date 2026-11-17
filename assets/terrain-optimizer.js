@@ -11,14 +11,14 @@
       eco:      { baseCols: 16, baseRows: 8,  maxDepth: 4, errorTolM: 6.0, slopeTolM: 15.0, coastDepth: 3, oceanMarginCells: 1 }
     },
     haeundae: {
-      adaptive: { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 1.4, slopeTolM: 4.2, coastDepth: 4, oceanMarginCells: 2 },
-      high:     { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 0.55, slopeTolM: 2.0, coastDepth: 4, oceanMarginCells: 3 },
-      eco:      { baseCols: 16, baseRows: 12, maxDepth: 4, errorTolM: 3.8, slopeTolM: 11.0, coastDepth: 3, oceanMarginCells: 1 }
+      adaptive: { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 1.05, slopeTolM: 3.2, coastDepth: 4, oceanMarginCells: 2 },
+      high:     { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 0.45, slopeTolM: 1.7, coastDepth: 4, oceanMarginCells: 3 },
+      eco:      { baseCols: 16, baseRows: 12, maxDepth: 4, errorTolM: 3.5, slopeTolM: 10.0, coastDepth: 3, oceanMarginCells: 1 }
     },
     incheon: {
-      adaptive: { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 1.2, slopeTolM: 3.8, coastDepth: 4, oceanMarginCells: 2 },
-      high:     { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 0.5, slopeTolM: 1.8, coastDepth: 4, oceanMarginCells: 3 },
-      eco:      { baseCols: 16, baseRows: 12, maxDepth: 4, errorTolM: 3.4, slopeTolM: 9.5, coastDepth: 3, oceanMarginCells: 1 }
+      adaptive: { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 0.90, slopeTolM: 2.8, coastDepth: 4, oceanMarginCells: 2 },
+      high:     { baseCols: 24, baseRows: 16, maxDepth: 4, errorTolM: 0.42, slopeTolM: 1.5, coastDepth: 4, oceanMarginCells: 3 },
+      eco:      { baseCols: 16, baseRows: 12, maxDepth: 4, errorTolM: 3.2, slopeTolM: 9.0, coastDepth: 3, oceanMarginCells: 1 }
     },
     gangneung: {
       adaptive: { baseCols: 24, baseRows: 24, maxDepth: 4, errorTolM: 2.2, slopeTolM: 6.2, coastDepth: 4, oceanMarginCells: 2 },

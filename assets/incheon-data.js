@@ -1,4 +1,4 @@
-// Incheon, Incheon Bridge, and Incheon International Airport 3D Asset Data & Generator
+// Incheon, Incheon Bridge, Yeongjongdo, Songdo & Airport 3D Asset Data & High-Detail Generator
 (() => {
   'use strict';
 
@@ -69,26 +69,90 @@
     return (du + dv) <= 0.42;
   }
 
-  // Coastal outline and land polygons for Incheon mainland & Songdo
+  // Fast deterministic hash + fractal noise (shared by land masks & terrain generator)
+  function hash(ix, iy) {
+    let n = (Math.imul(ix | 0, 374761393) + Math.imul(iy | 0, 668265263)) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+  }
+
+  function smoothNoise(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const a = hash(ix, iy), b = hash(ix + 1, iy);
+    const c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
+    return (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sfyClamp(sy);
+  }
+
+  function sfyClamp(v) {
+    return v;
+  }
+
+  function fbm(x, y, octaves) {
+    let val = 0, amp = 0.5, freq = 1;
+    for (let i = 0; i < (octaves || 3); i++) {
+      val += smoothNoise(x * freq, y * freq) * amp;
+      amp *= 0.5;
+      freq *= 2.02;
+    }
+    return val;
+  }
+
+  function ridgedFbm(x, y, octaves) {
+    let sum = 0, amp = 0.5, freq = 1, weight = 1;
+    for (let i = 0; i < (octaves || 4); i++) {
+      let n = 1.0 - Math.abs(smoothNoise(x * freq, y * freq) * 2.0 - 1.0);
+      n = n * n * weight;
+      weight = Math.min(1.0, Math.max(0.24, n * 1.65));
+      sum += n * amp;
+      amp *= 0.5;
+      freq *= 2.12;
+    }
+    return sum;
+  }
+
+  function distToSegKm(lat, lng, lat1, lng1, lat2, lng2) {
+    const x = (lng - BOUNDS.west) * 88.36;
+    const y = (lat - BOUNDS.south) * 111.0;
+    const x1 = (lng1 - BOUNDS.west) * 88.36;
+    const y1 = (lat1 - BOUNDS.south) * 111.0;
+    const x2 = (lng2 - BOUNDS.west) * 88.36;
+    const y2 = (lat2 - BOUNDS.south) * 111.0;
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(x - x1, y - y1);
+    const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / lenSq));
+    return Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy));
+  }
+
+  // Coastal outline for Mainland Incheon + Songdo + Wolmido (3D base & shoreline)
   const INCHEON_OUTLINE = [
-    [126.6500, 37.3400], // Songdo South New Port
-    [126.6200, 37.3550], // Songdo Southwest coastal dike
-    [126.6050, 37.3800], // Songdo Incheon Bridge bridgehead
-    [126.5950, 37.4200], // Incheon Coastal Pier / Port
-    [126.5900, 37.4550], // Incheon Inner Port / Lock gate
-    [126.5950, 37.4760], // Wolmido west tip
-    [126.6080, 37.4900], // Bukseongpo / North Port
-    [126.6250, 37.5150], // Incheon North Port industrial
-    [126.6350, 37.5350], // Cheongna west waterfront
-    [126.6200, 37.5500], // Yeongjong Bridge east bridgehead
-    [126.6800, 37.5550], // Cheongna East / Asiad stadium
-    [126.7200, 37.5450], // Bupyeong / Gyeyang boundary
-    [126.7350, 37.5000], // Bupyeong / Juan
-    [126.7400, 37.4500], // Namdong / Munhak
-    [126.7250, 37.4100], // Namdong Industrial Complex
-    [126.6900, 37.3700], // Songdo East canal entrance
-    [126.6600, 37.3450],
-    [126.6500, 37.3400]
+    [126.6480, 37.3390], // Songdo South New Port basin
+    [126.6280, 37.3480],
+    [126.6120, 37.3620], // Songdo Southwest dike corner (Jack Nicklaus)
+    [126.6020, 37.3810], // Songdo Incheon Bridge bridgehead
+    [126.6160, 37.3980], // Songdo north seawall channel
+    [126.6320, 37.4080], // Aam Lake canal entrance
+    [126.6100, 37.4220], // Namhang Pier finger
+    [126.5970, 37.4420], // Incheon Coastal Pier / Port
+    [126.5940, 37.4560], // Incheon Inner Port Lock Gate
+    [126.5920, 37.4720], // Wolmido south headland
+    [126.5950, 37.4820], // Wolmido west tip
+    [126.6080, 37.4920], // Bukseongpo / Port basin
+    [126.6240, 37.5150], // Incheon North Port industrial piers
+    [126.6340, 37.5350], // Cheongna west waterfront dike
+    [126.6160, 37.5495], // Yeongjong Bridge east bridgehead (Gyeongin Ara Canal entrance)
+    [126.6520, 37.5540],
+    [126.6900, 37.5565], // Cheongna East / Gyeyang boundary
+    [126.7320, 37.5480], // Bupyeong / Gyeyang ridge
+    [126.7420, 37.5020], // Bupyeong / Juan
+    [126.7440, 37.4520], // Namdong / Munhak
+    [126.7280, 37.4080], // Namdong Industrial Complex
+    [126.6940, 37.3720], // Songdo East canal seawall
+    [126.6700, 37.3450],
+    [126.6480, 37.3390]
   ];
 
   // Presets (keep first 3 unchanged for saved states & tests)
@@ -272,37 +336,89 @@
     }
   ];
 
-  // Land check helpers
+  // Authentic Domain-Warped Coastal Contours for Yeongjongdo, Yongyudo, Songdo & Incheon Mainland
   function inYeongjong(lng, lat) {
     if (inAirportReclamation(lat, lng)) return true;
-    // Main Yeongjongdo & Yongyudo natural island shape
-    const yjMain = Math.hypot((lng - 126.505) / 0.082, (lat - 37.482) / 0.048);
-    if (yjMain < 1.0) return true;
-    const yongyu = Math.hypot((lng - 126.395) / 0.036, (lat - 37.456) / 0.032);
-    if (yongyu < 1.0) return true;
-    // Connecting southern road dike between Yongyu and Yeongjong
-    const bridgeDike = Math.hypot((lng - 126.455) / 0.068, (lat - 37.432) / 0.018);
-    return bridgeDike < 1.0;
+
+    // Multi-octave organic coastal warp so islands look like natural Yellow Sea ria coastlines, not ellipses
+    const nx = (lng - 126.35) * 42;
+    const ny = (lat - 37.33) * 52;
+    const warp = (fbm(nx, ny, 3) - 0.5) * 0.26;
+
+    // Yeongjongdo main body (Baekunsan massif + Gu-eup Batter eastern cape + Jayeondo sky city)
+    const dYjCore = Math.hypot((lng - 126.512) / 0.068, (lat - 37.488) / 0.044) + warp * 0.65;
+    if (dYjCore < 1.0) return true;
+
+    // East Cape toward Gu-eup Batter waterfront overlooking Wolmido
+    const dEastCape = Math.hypot((lng - 126.565) / 0.026, (lat - 37.492) / 0.022) + warp * 0.5;
+    if (dEastCape < 1.0) return true;
+
+    // North-west headland toward Yeongjong Bridge approach & Sammok-do
+    const dNorthWing = Math.hypot((lng - 126.462) / 0.046, (lat - 37.508) / 0.022) + warp * 0.55;
+    if (dNorthWing < 1.0) return true;
+
+    // Yongyudo natural hilly west peninsula (west of Airport) with Wangsan & Eulwangni coves carved out!
+    const dYongyu = Math.hypot((lng - 126.395) / 0.036, (lat - 37.456) / 0.032) + warp * 0.65;
+    if (dYongyu < 1.0) {
+      // Carve authentic crescent cove at Eulwangni beach (37.446, 126.369)
+      const dEulBay = Math.hypot((lng - 126.365) / 0.011, (lat - 37.446) / 0.0085);
+      if (dEulBay < 1.0) return false;
+      // Carve Wangsan beach cove to the north (37.458, 126.368)
+      const dWangBay = Math.hypot((lng - 126.364) / 0.010, (lat - 37.459) / 0.0075);
+      if (dWangBay < 1.0) return false;
+      return true;
+    }
+
+    // Engineered Southern Airport Link Road seawall causeway (Yongyudo <-> Yeongjongdo)
+    const dSouthDike = distToSegKm(lat, lng, 37.434, 126.404, 37.444, 126.505);
+    if (dSouthDike < 0.72 + warp * 0.25) return true;
+
+    return false;
   }
 
   function inSongdo(lng, lat) {
-    if (lng < 126.598 || lng > 126.682 || lat < 37.352 || lat > 37.416) return false;
-    // Chamfer southwest seawall & southeast canal corner to match Songdo International City dikes
-    if ((126.625 - lng) * 1.1 + (37.375 - lat) * 1.4 > 0.034) return false;
-    if ((lng - 126.660) * 0.9 + (37.365 - lat) * 1.2 > 0.026) return false;
+    if (lng < 126.596 || lng > 126.688 || lat < 37.339 || lat > 37.409) return false;
+    // Chamfer southwest seawall & southeast New Port channel corners cleanly
+    if ((126.628 - lng) * 1.15 + (37.376 - lat) * 1.45 > 0.036) return false;
+    if ((lng - 126.656) * 0.95 + (37.362 - lat) * 1.25 > 0.030) return false;
+    // Carve outer port channel indentation between Songdo Districts 6-8 and New Port
+    if (lat < 37.356 && lng > 126.634 && lng < 126.648) return false;
     return true;
   }
 
   function inMainland(lng, lat) {
-    return (lng >= 126.602 && lat >= 37.415) || (lng >= 126.640 && lat >= 37.340) ||
-      Math.hypot((lng - 126.598) / 0.014, (lat - 37.474) / 0.014) < 1.0; // Wolmido
+    const nx = (lng - 126.55) * 48;
+    const ny = (lat - 37.33) * 56;
+    const warp = (fbm(nx, ny, 3) - 0.5) * 0.009;
+
+    // Mainland urban/hilly mass east of Incheon Harbor & north/east of Aam Lake canal (never overlapping Songdo)
+    const inEastCore = (lng >= 126.620 + warp && lat >= 37.412) || (lng >= 126.690 + warp && lat >= 37.360);
+    if (inEastCore) return true;
+
+    // Wolmido rocky peninsula & causeway pier
+    const dWolmi = Math.hypot((lng - 126.599) / 0.014, (lat - 37.475) / 0.014) + warp * 12;
+    if (dWolmi < 1.0) return true;
+    // Wolmi causeway + Incheon Inner Harbor lock piers (Pier 1-8 seawalls)
+    if (lat >= 37.468 && lat <= 37.479 && lng >= 126.605 && lng <= 126.628) return true;
+    // Coastal Pier & Yeonan Pier finger (37.452)
+    if (lat >= 37.448 && lat <= 37.461 && lng >= 126.598 && lng <= 126.625) return true;
+    // Namhang Pier southern extension (37.434)
+    if (lat >= 37.430 && lat <= 37.440 && lng >= 126.606 && lng <= 126.632) return true;
+    // North Port / Cheongna waterfront reclamation & Ara Canal south embankment
+    if (lat >= 37.515 && lat <= 37.554 && lng >= 126.615 && lng <= 126.640) {
+      // Carve Gyeongin Ara Waterway mouth channel (~37.547)
+      if (Math.abs(lat - 37.5465) < 0.0022 && lng < 126.642) return false;
+      return true;
+    }
+
+    return false;
   }
 
   function inIncheonLand(lng, lat) {
     return inYeongjong(lng, lat) || inSongdo(lng, lat) || inMainland(lng, lat);
   }
 
-  // Procedural Asset Generator for Incheon (2048x2048 crisp satellite + 2x vector airfield + 512x512 DEM)
+  // Procedural Asset Generator for Incheon (2048x2048 PBR satellite + 2x vector airfield + 512x512 ridged DEM)
   function createIncheonAssets() {
     const w = 2048;
     const h = 2048;
@@ -334,34 +450,7 @@
     roughnessCanvas.height = h;
     const rgCtx = roughnessCanvas.getContext('2d');
 
-    // Fast deterministic 32-bit integer hash noise
-    function hash(ix, iy) {
-      let n = (Math.imul(ix | 0, 374761393) + Math.imul(iy | 0, 668265263)) | 0;
-      n = Math.imul(n ^ (n >>> 13), 1274126177);
-      return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
-    }
-
-    function smoothNoise(x, y) {
-      const ix = Math.floor(x), iy = Math.floor(y);
-      const fx = x - ix, fy = y - iy;
-      const sx = fx * fx * (3 - 2 * fx);
-      const sy = fy * fy * (3 - 2 * fy);
-      const a = hash(ix, iy), b = hash(ix + 1, iy);
-      const c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
-      return (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy;
-    }
-
-    function fbm(x, y, octaves) {
-      let val = 0, amp = 0.5, freq = 1;
-      for (let i = 0; i < (octaves || 3); i++) {
-        val += smoothNoise(x * freq, y * freq) * amp;
-        amp *= 0.5;
-        freq *= 2.02;
-      }
-      return val;
-    }
-
-    // 1. Precalculate terrain height array (512x512)
+    // 1. Precalculate ridged geological terrain height array (512x512)
     const hImg = hCtx.createImageData(hw, hh);
     const hData = hImg.data;
     const heights = new Float32Array(hw * hh);
@@ -373,63 +462,143 @@
         const lng = BOUNDS.west + (px / (hw - 1)) * (BOUNDS.east - BOUNDS.west);
         const idx = rowOff + px;
 
+        const nX = (lng - BOUNDS.west) * 65;
+        const nY = (lat - BOUNDS.south) * 65;
+        const ridgeDetail = ridgedFbm(nX * 0.45 + 1.4, nY * 0.45 + 2.8, 4);
+        const fineRock = ridgedFbm(nX * 1.15 + 5.1, nY * 1.15 + 3.3, 3);
+        const valleyFbm = fbm(nX * 0.55, nY * 0.55, 3);
+
         let elev = 0;
         const onAirportReclaim = inAirportReclamation(lat, lng);
         const onYeongjong = inYeongjong(lng, lat);
 
         if (onAirportReclaim) {
-          elev = 8;
+          elev = 8.0;
         } else if (onYeongjong) {
-          elev = 7;
+          elev = 6.5 + valleyFbm * 2.5;
 
-          // Baekunsan (255m peak)
-          const baekDist = Math.hypot((lng - 126.518) * 90, (lat - 37.498) * 111);
-          if (baekDist < 3.6) {
-            const hShape = Math.cos((baekDist / 3.6) * Math.PI * 0.5);
-            const ridgeNoise = 0.85 + fbm(px * 0.07, py * 0.07, 3) * 0.3;
-            elev += Math.pow(hShape, 1.7) * 245 * ridgeNoise;
+          // Baekunsan Massif (255m peak) + East-West granite spine to Seokhwasan / Geumisan
+          let yjPeak = 0;
+          const baekDist = Math.hypot((lng - 126.518) * 88.36, (lat - 37.498) * 111.0);
+          if (baekDist < 4.2) {
+            const f = Math.max(0, 1 - baekDist / 4.2);
+            yjPeak = Math.max(yjPeak, 255 * Math.pow(f, 1.55) * (0.76 + ridgeDetail * 0.34));
+          }
+          const dYjSpineE = distToSegKm(lat, lng, 37.498, 126.518, 37.494, 126.556);
+          if (dYjSpineE < 1.8) {
+            const f = Math.max(0, 1 - dYjSpineE / 1.8);
+            yjPeak = Math.max(yjPeak, 152 * Math.pow(f, 1.75) * (0.74 + ridgeDetail * 0.34));
+          }
+          const dYjSpineN = distToSegKm(lat, lng, 37.498, 126.518, 37.515, 126.502);
+          if (dYjSpineN < 1.6) {
+            const f = Math.max(0, 1 - dYjSpineN / 1.6);
+            yjPeak = Math.max(yjPeak, 146 * Math.pow(f, 1.75) * (0.74 + fineRock * 0.32));
           }
 
-          // Yongyudo hills (west of airport)
-          const yongDist = Math.hypot((lng - 126.392) * 90, (lat - 37.454) * 111);
-          if (yongDist < 2.2) {
-            const hShape = Math.cos((yongDist / 2.2) * Math.PI * 0.5);
-            elev += Math.pow(hShape, 1.5) * 115 * (0.85 + fbm(px * 0.08, py * 0.08, 3) * 0.3);
+          // Yongyudo Oraebong / Wangsan hills (128m peak + ridge behind Eulwangni cove)
+          const yongDist = Math.hypot((lng - 126.392) * 88.36, (lat - 37.454) * 111.0);
+          if (yongDist < 2.6) {
+            const f = Math.max(0, 1 - yongDist / 2.6);
+            yjPeak = Math.max(yjPeak, 128 * Math.pow(f, 1.55) * (0.76 + ridgeDetail * 0.32));
+          }
+          const dMasian = Math.hypot((lng - 126.404) * 88.36, (lat - 37.434) * 111.0);
+          if (dMasian < 1.6) {
+            const f = Math.max(0, 1 - dMasian / 1.6);
+            yjPeak = Math.max(yjPeak, 82 * Math.pow(f, 1.65) * (0.80 + fineRock * 0.25));
           }
 
-          // Smooth transition so hills don't encroach onto airport platform
+          elev = Math.max(elev, yjPeak + 6.0);
+
+          // Smooth collar so Yeongjong hills never encroach onto Airport reclaimed runways
           const { u, v } = latLngToAirport(lat, lng);
           const marginU = Math.max(0, Math.abs(u) - 2.38);
           const marginV = Math.max(0, Math.abs(v) - 2.58);
           const edgeDist = Math.hypot(marginU, marginV);
-          if (edgeDist < 0.45) {
-            const blend = edgeDist / 0.45;
-            elev = 8 + (elev - 8) * blend;
+          if (edgeDist < 0.55) {
+            const t = edgeDist / 0.55;
+            const blend = t * t * (3 - 2 * t);
+            elev = 8.0 + (elev - 8.0) * blend;
           }
         }
 
-        // Songdo International City
+        // Songdo International City engineered platform (7m) + Central Park basin
         if (inSongdo(lng, lat)) {
-          elev = Math.max(elev, 7);
+          elev = Math.max(elev, 7.2);
+          const inCanal = Math.abs((lng - 126.638) - (lat - 37.392) * 0.32) < 0.0022 && (lat >= 37.384 && lat <= 37.400);
+          if (inCanal) elev = 2.0;
         }
 
-        // Mainland Hills + Wolmido (105m)
-        if (inMainland(lng, lat)) {
-          elev = Math.max(elev, 11);
+        // Mainland Hills (Munhaksan 217m, Cheongnyangsan 158m, Wolmido 105m, NE Gyeyang Foothills)
+        if (inMainland(lng, lat) && !inSongdo(lng, lat)) {
+          elev = Math.max(elev, 10.5 + valleyFbm * 3.0);
 
-          const wolDist = Math.hypot((lng - 126.601) * 90, (lat - 37.475) * 111);
-          if (wolDist < 1.1) {
-            elev += Math.pow(Math.cos((wolDist / 1.1) * Math.PI * 0.5), 1.4) * 95;
+          let mainPeak = 0;
+
+          // Wolmido (Wolmisan 105m wooded island cone)
+          const wolDist = Math.hypot((lng - 126.600) * 88.36, (lat - 37.475) * 111.0);
+          if (wolDist < 1.25) {
+            const f = Math.max(0, 1 - wolDist / 1.25);
+            mainPeak = Math.max(mainPeak, 106 * Math.pow(f, 1.50) * (0.82 + fineRock * 0.26));
           }
 
-          const munDist = Math.hypot((lng - 126.678) * 90, (lat - 37.433) * 111);
-          if (munDist < 3.6) {
-            elev += Math.pow(Math.cos((munDist / 3.6) * Math.PI * 0.5), 1.6) * 208 * (0.88 + fbm(px * 0.06, py * 0.06, 3) * 0.24);
+          // Munhaksan (217m) E-W ridge spine (Gilmasan -> Munhaksan -> Beopjusan)
+          const dMunSpine = distToSegKm(lat, lng, 37.434, 126.655, 37.432, 126.705);
+          if (dMunSpine < 2.2) {
+            const f = Math.max(0, 1 - dMunSpine / 2.2);
+            mainPeak = Math.max(mainPeak, 212 * Math.pow(f, 1.60) * (0.76 + ridgeDetail * 0.34));
+          }
+          const munDist = Math.hypot((lng - 126.678) * 88.36, (lat - 37.433) * 111.0);
+          if (munDist < 2.0) {
+            const f = Math.max(0, 1 - munDist / 2.0);
+            mainPeak = Math.max(mainPeak, 220 * Math.pow(f, 1.55) * (0.80 + fineRock * 0.28));
           }
 
-          const chnDist = Math.hypot((lng - 126.655) * 90, (lat - 37.408) * 111);
-          if (chnDist < 2.2) {
-            elev += Math.pow(Math.cos((chnDist / 2.2) * Math.PI * 0.5), 1.5) * 158;
+          // Cheongnyangsan (158m) & Bongjaesan ridge cleanly north of Aam Lake (Yeonsu/Okryeon)
+          const dChnSpine = distToSegKm(lat, lng, 37.422, 126.645, 37.419, 126.670);
+          if (dChnSpine < 1.35) {
+            const f = Math.max(0, 1 - dChnSpine / 1.35);
+            mainPeak = Math.max(mainPeak, 158 * Math.pow(f, 1.60) * (0.78 + ridgeDetail * 0.30));
+          }
+
+          // Gajeong / Wonjeoksan / Gyeyang urban ridge spine (NE Mainland, up to 215m)
+          const dWonjeok = distToSegKm(lat, lng, 37.508, 126.682, 37.548, 126.726);
+          if (dWonjeok < 3.0) {
+            const f = Math.max(0, 1 - dWonjeok / 3.0);
+            mainPeak = Math.max(mainPeak, 205 * Math.pow(f, 1.65) * (0.74 + ridgeDetail * 0.34));
+          }
+
+          // Jayupark / Eungbongsan central harbor hill overlooking Inner Port
+          const dEung = Math.hypot((lng - 126.621) * 88.36, (lat - 37.475) * 111.0);
+          if (dEung < 1.1) {
+            const f = Math.max(0, 1 - dEung / 1.1);
+            mainPeak = Math.max(mainPeak, 68 * Math.pow(f, 1.65));
+          }
+
+          elev = Math.max(elev, mainPeak + 8.5);
+
+          // Keep Cheongna Lake Park basin flat & low
+          const dCheongnaLake = Math.hypot((lng - 126.654) * 88.36, (lat - 37.531) * 111.0);
+          if (dCheongnaLake < 1.15) {
+            elev = Math.min(elev, 6.0);
+          }
+
+          // Keep Inner Harbor / Coastal Pier docks flat
+          if (lng > 126.585 && lng < 126.628 && lat > 37.432 && lat < 37.520 && wolDist > 1.15) {
+            elev = Math.min(elev, 7.5);
+          }
+        }
+
+        // Smooth INLAND-ONLY cosine taper on North and East map borders (1.1km margin)
+        // Eliminates the hard vertical cliff table edge along the inland border while keeping West coastlines sharp!
+        if (onYeongjong || inMainland(lng, lat) || inSongdo(lng, lat)) {
+          const dEastKm = (BOUNDS.east - lng) * 88.36;
+          const dNorthKm = lat > 37.542 && lng > 126.620 ? (BOUNDS.north - lat) * 111.0 : 99;
+          const dSouthInlandKm = lng > 126.655 && lat < 37.350 ? (lat - BOUNDS.south) * 111.0 : 99;
+          const inlandKm = Math.min(dEastKm, dNorthKm, dSouthInlandKm);
+          if (inlandKm < 1.05) {
+            const t = Math.max(0, Math.min(1, inlandKm / 1.05));
+            const fade = 0.5 - 0.5 * Math.cos(Math.PI * t);
+            elev *= fade;
           }
         }
 
@@ -448,7 +617,7 @@
 
     // 1B. Land mask & coastal Chamfer distance at full 2048x2048 resolution
     const total = w * h;
-    const landType = new Uint8Array(total); // 0: sea, 1: airport, 2: songdo, 3: yeongjong/mainland
+    const landType = new Uint8Array(total); // 0: sea/mudflat, 1: airport, 2: songdo, 3: yeongjong/mainland
     const coastDist = new Uint8Array(total);
     const latStep = (BOUNDS.north - BOUNDS.south) / (h - 1);
     const lngStep = (BOUNDS.east - BOUNDS.west) / (w - 1);
@@ -499,7 +668,27 @@
       }
     }
 
-    // 2. Render base 2048x2048 satellite terrain, elevation, normal & roughness maps
+    // Bilinear sampler for smooth 2048-scale height gradients (eliminates 512px grid facets!)
+    const hScaleX = (hw - 1) / (w - 1);
+    const hScaleY = (hh - 1) / (h - 1);
+    function sampleElev(px, py) {
+      const sx = px < 0 ? 0 : (px >= w - 1 ? hw - 1.001 : px * hScaleX);
+      const sy = py < 0 ? 0 : (py >= h - 1 ? hh - 1.001 : py * hScaleY);
+      const x0 = sx | 0, y0 = sy | 0;
+      const dx = sx - x0, dy = sy - y0;
+      const r0 = y0 * hw, r1 = r0 + hw;
+      const h00 = heights[r0 + x0];
+      const h10 = heights[r0 + x0 + 1];
+      const h01 = heights[r1 + x0];
+      const h11 = heights[r1 + x0 + 1];
+      return (h00 * (1 - dx) + h10 * dx) * (1 - dy) + (h01 * (1 - dx) + h11 * dx) * dy;
+    }
+
+    // Rotated street matrix constants for Songdo (~33°) & Cheongna/Guwol (~-12°)
+    const COS_SD = Math.cos(0.57), SIN_SD = Math.sin(0.57);
+    const COS_ML = Math.cos(-0.20), SIN_ML = Math.sin(-0.20);
+
+    // 2. Render 2048x2048 PBR satellite, elevation, normal & roughness maps
     const nImg = nCtx.createImageData(w, h);
     const nData = nImg.data;
     const eImg = eCtx.createImageData(w, h);
@@ -509,43 +698,28 @@
     const rgImg = rgCtx.createImageData(w, h);
     const rgData = rgImg.data;
 
-    const hScaleX = (hw - 1) / (w - 1);
-    const hScaleY = (hh - 1) / (h - 1);
-
     for (let py = 0; py < h; py++) {
       const lat = BOUNDS.north - py * latStep;
-      const hyF = py * hScaleY;
-      const hy0 = hyF | 0;
-      const hy1 = Math.min(hh - 1, hy0 + 1);
-      const dyH = hyF - hy0;
       const rowOff = py * w;
 
       for (let px = 0; px < w; px++) {
         const lng = BOUNDS.west + px * lngStep;
-        const hxF = px * hScaleX;
-        const hx0 = hxF | 0;
-        const hx1 = Math.min(hw - 1, hx0 + 1);
-        const dxH = hxF - hx0;
-
         const pIdx = rowOff + px;
         const idx = pIdx * 4;
 
-        // Bilinear height interpolation
-        const elev =
-          (heights[hy0 * hw + hx0] * (1 - dxH) + heights[hy0 * hw + hx1] * dxH) * (1 - dyH) +
-          (heights[hy1 * hw + hx0] * (1 - dxH) + heights[hy1 * hw + hx1] * dxH) * dyH;
-
-        const hL = heights[hy0 * hw + Math.max(0, hx0 - 1)];
-        const hR = heights[hy0 * hw + Math.min(hw - 1, hx0 + 1)];
-        const hU = heights[Math.max(0, hy0 - 1) * hw + hx0];
-        const hD = heights[Math.min(hh - 1, hy0 + 1) * hw + hx0];
+        const elev = sampleElev(px, py);
+        const hL = sampleElev(px - 3, py);
+        const hR = sampleElev(px + 3, py);
+        const hU = sampleElev(px, py - 3);
+        const hD = sampleElev(px, py + 3);
 
         const grain = hash(px, py);
-        const microBumpX = (hash(px + 1, py) - hash(px - 1, py)) * 0.032;
-        const microBumpY = (hash(px, py + 1) - hash(px, py - 1)) * 0.032;
+        const microR0 = smoothNoise(px * 0.24, py * 0.24);
+        const microRx = smoothNoise((px + 1.5) * 0.24, py * 0.24) - microR0;
+        const microRy = smoothNoise(px * 0.24, (py + 1.5) * 0.24) - microR0;
 
-        const dx = (hR - hL) * 0.13 + microBumpX;
-        const dy = (hD - hU) * 0.13 + microBumpY;
+        const dx = (hR - hL) * 0.14 + microRx * 0.12;
+        const dy = (hD - hU) * 0.14 + microRy * 0.12;
         const nz = 1.0;
         const len = Math.hypot(dx, dy, nz);
 
@@ -556,16 +730,17 @@
 
         const sunX = -0.52, sunY = -0.62, sunZ = 0.58;
         const dot = Math.max(0.15, (-dx * sunX - dy * sunY + nz * sunZ) / len);
-        const shade = 0.60 + dot * 0.45;
+        const slope = Math.hypot((hR - hL) * 0.14, (hD - hU) * 0.14);
+        const shade = Math.min(1.36, 0.56 + dot * 0.50);
 
         const nCoarse = fbm(px * 0.013, py * 0.013, 3);
-        const nFine = fbm(px * 0.06, py * 0.06, 2);
+        const nFine = fbm(px * 0.062, py * 0.062, 2);
 
         const kind = landType[pIdx];
         const cDist = coastDist[pIdx];
 
         let r = 28, g = 68, b = 104, a = 255;
-        let roughVal = 52; // Glossy water default
+        let roughVal = 52;
 
         if (kind === 0) {
           // West Sea mudflats (갯벌) & shallow coastal dendritic tidal channels
@@ -573,156 +748,236 @@
             Math.abs(lat - 37.4615) - 0.032,
             Math.abs(lng - 126.4425) - 0.038
           );
-          const distYJ = Math.hypot((lng - 126.495) / 0.095, (lat - 37.475) / 0.055) - 1.0;
-          const distSongdo = Math.hypot(Math.max(0, 126.600 - lng), Math.max(0, 37.358 - lat)) * 12;
-          const mudZone = Math.min(Math.max(0, distAirport * 18), Math.max(0, distYJ * 3.5), distSongdo);
+          const distYJ = Math.hypot((lng - 126.495) / 0.105, (lat - 37.475) / 0.058) - 1.0;
+          const distSongdo = Math.hypot(Math.max(0, 126.600 - lng), Math.max(0, 37.352 - lat)) * 11.5;
+          const mudZone = Math.min(Math.max(0, distAirport * 16), Math.max(0, distYJ * 3.2), distSongdo);
 
-          if (mudZone < 0.30) {
-            const warpX = fbm(px * 0.011, py * 0.011, 2) * 15;
-            const warpY = fbm(px * 0.011 + 19.3, py * 0.011 + 7.1, 2) * 15;
-            const tidalCreek = Math.abs(fbm((px + warpX) * 0.024, (py + warpY) * 0.024, 3) - 0.5) * 2;
-            const subCreek = Math.abs(fbm((px - warpY) * 0.058, (py + warpX) * 0.058, 2) - 0.5) * 2;
-            const isCreek = tidalCreek < 0.075 || subCreek < 0.045;
-            const tShallow = Math.max(0, 1 - mudZone / 0.30);
+          if (mudZone < 0.34) {
+            const warpX = fbm(px * 0.010, py * 0.010, 2) * 18;
+            const warpY = fbm(px * 0.010 + 19.3, py * 0.010 + 7.1, 2) * 18;
+            const tidalCreek = Math.abs(fbm((px + warpX) * 0.022, (py + warpY) * 0.022, 3) - 0.5) * 2;
+            const subCreek = Math.abs(fbm((px - warpY) * 0.054, (py + warpX) * 0.054, 2) - 0.5) * 2;
+            const isCreek = tidalCreek < 0.08 || subCreek < 0.048;
+            const tShallow = Math.max(0, 1 - mudZone / 0.34);
             if (isCreek) {
-              r = Math.floor(42 + tShallow * 18 + nFine * 8);
-              g = Math.floor(96 + tShallow * 24 + nFine * 10);
-              b = Math.floor(126 + tShallow * 18 + nFine * 10);
+              r = Math.floor(38 + tShallow * 18 + nFine * 8);
+              g = Math.floor(94 + tShallow * 24 + nFine * 10);
+              b = Math.floor(124 + tShallow * 18 + nFine * 10);
               a = Math.round(135 + tShallow * 95);
-              roughVal = 54;
+              roughVal = 52;
             } else {
-              // Warm wet tidal silt-sand flats near island coastlines
-              r = Math.floor(96 + tShallow * 38 + nFine * 12 + grain * 5);
-              g = Math.floor(116 + tShallow * 26 + nFine * 10 + grain * 5);
-              b = Math.floor(122 + nFine * 10);
-              a = Math.round(tShallow * 225);
-              roughVal = Math.round(92 + tShallow * 55);
+              // Warm wet tidal mud-silt & coastal sandbars
+              r = Math.floor(96 + tShallow * 42 + nFine * 14 + grain * 5);
+              g = Math.floor(114 + tShallow * 28 + nFine * 12 + grain * 5);
+              b = Math.floor(118 + nFine * 10);
+              a = Math.round(tShallow * 230);
+              roughVal = Math.round(88 + tShallow * 58);
             }
           } else {
-            // Transparent open sea so the 3D ocean plane renders without a rectangular seam
             a = 0;
             roughVal = 48;
           }
         } else if (kind === 1) {
           // Manicured airfield turf grass base (runways & aprons drawn in 2x vector pass below)
-          r = Math.floor(68 + nCoarse * 18 + nFine * 10 + grain * 5);
-          g = Math.floor(110 + nCoarse * 20 + nFine * 12 + grain * 6);
-          b = Math.floor(62 + nCoarse * 10);
+          r = Math.floor(66 + nCoarse * 18 + nFine * 10 + grain * 5);
+          g = Math.floor(108 + nCoarse * 20 + nFine * 12 + grain * 6);
+          b = Math.floor(60 + nCoarse * 10);
           roughVal = 222;
         } else if (kind === 2) {
+          // Songdo International City: Rotated Boulevard Grid + Seawater Central Park Canal + Golf Greens
           const inCanal = Math.abs((lng - 126.638) - (lat - 37.392) * 0.32) < 0.0020 && (lat >= 37.384 && lat <= 37.400);
-          const inPark = Math.abs((lng - 126.638) - (lat - 37.392) * 0.32) < 0.0052 && (lat >= 37.382 && lat <= 37.402);
+          const inPark = Math.abs((lng - 126.638) - (lat - 37.392) * 0.32) < 0.0055 && (lat >= 37.382 && lat <= 37.402);
+          const dGolf = Math.hypot((lng - 126.618) * 88.36, (lat - 37.372) * 111.0);
           if (inCanal) {
-            r = 34; g = 122; b = 152;
+            r = 32; g = 118; b = 150;
             roughVal = 45;
           } else if (inPark) {
-            r = Math.floor(60 + nFine * 16 + grain * 5);
-            g = Math.floor(120 + nFine * 18 + grain * 5);
-            b = Math.floor(68 + nFine * 10);
+            r = Math.floor(54 + nFine * 18 + grain * 5);
+            g = Math.floor(118 + nFine * 20 + grain * 5);
+            b = Math.floor(64 + nFine * 10);
             roughVal = 220;
-          } else if (cDist <= 5) {
-            // Coastal engineered granite seawall dike edge
-            r = Math.floor(124 + nFine * 18 + grain * 8);
-            g = Math.floor(130 + nFine * 16 + grain * 8);
-            b = Math.floor(136 + nFine * 16);
+          } else if (dGolf < 0.85) {
+            // Jack Nicklaus Golf Club Korea fairways & sand traps
+            const fairway = nCoarse > 0.45 ? 12 : -8;
+            r = Math.floor(64 + fairway + nFine * 14);
+            g = Math.floor(126 + fairway + nFine * 16);
+            b = Math.floor(62 + nFine * 10);
+            roughVal = 218;
+          } else if (cDist <= 6) {
+            // Engineered granite Songdo seawall embankment
+            r = Math.floor(126 + nFine * 18 + grain * 8);
+            g = Math.floor(132 + nFine * 16 + grain * 8);
+            b = Math.floor(138 + nFine * 16);
             roughVal = 188;
           } else {
-            const gx = (px * 0.055) % 1;
-            const gy = (py * 0.055) % 1;
-            const isRoad = gx < 0.14 || gy < 0.14;
+            const ux = px * COS_SD - py * SIN_SD;
+            const uy = px * SIN_SD + py * COS_SD;
+            const bScale = 0.165;
+            const bx = Math.floor(ux * bScale);
+            const by = Math.floor(uy * bScale);
+            const gx = ux * bScale - bx;
+            const gy = uy * bScale - by;
+            const isRoad = gx < 0.16 || gy < 0.16;
             if (isRoad) {
-              r = Math.floor(74 + grain * 6); g = Math.floor(78 + grain * 6); b = Math.floor(84 + grain * 6);
-              roughVal = 148;
+              r = Math.floor(84 + grain * 5); g = Math.floor(88 + grain * 5); b = Math.floor(94 + grain * 5);
+              roughVal = 152;
             } else {
-              const blockHash = hash(Math.floor(px * 0.055), Math.floor(py * 0.055));
+              const blockHash = hash(bx, by);
               if (blockHash < 0.24) {
-                // Pocket neighborhood parks & green boulevards
-                r = Math.floor(66 + nFine * 16);
-                g = Math.floor(118 + nFine * 18);
-                b = Math.floor(72 + nFine * 12);
+                r = Math.floor(62 + nFine * 16);
+                g = Math.floor(114 + nFine * 18);
+                b = Math.floor(64 + nFine * 12);
                 roughVal = 222;
+              } else if (blockHash < 0.64) {
+                // Curtain-wall glass tower blocks
+                r = Math.floor(140 + nCoarse * 18 + grain * 5);
+                g = Math.floor(156 + nCoarse * 16 + grain * 5);
+                b = Math.floor(172 + nCoarse * 14);
+                roughVal = 128;
               } else {
-                r = Math.floor(144 + nCoarse * 24 + grain * 5);
-                g = Math.floor(160 + nCoarse * 22 + grain * 5);
-                b = Math.floor(176 + nCoarse * 20);
-                roughVal = 138;
+                r = Math.floor(158 + nFine * 14 + grain * 5);
+                g = Math.floor(162 + nFine * 14 + grain * 5);
+                b = Math.floor(168 + nFine * 12);
+                roughVal = 168;
               }
             }
           }
         } else {
-          // Eurwangni golden sandy beach arc with surf & wet tide band
-          const eurDist = Math.hypot((lng - 126.371) * 90, (lat - 37.446) * 111);
-          if (eurDist < 0.44 && elev < 18) {
+          // Eurwangni & Wangsan twin golden sandy beach coves + surf
+          const eurDist = Math.hypot((lng - 126.370) * 88.36, (lat - 37.446) * 111.0);
+          const wangDist = Math.hypot((lng - 126.369) * 88.36, (lat - 37.459) * 111.0);
+          const dCheongnaLake = Math.hypot((lng - 126.654) * 88.36, (lat - 37.531) * 111.0);
+          const isInnerPortPiers = (lng > 126.585 && lng < 126.628 && lat > 37.432 && lat < 37.520 && elev < 14 && Math.hypot((lng - 126.600) * 88.36, (lat - 37.475) * 111.0) > 1.12);
+
+          if ((eurDist < 0.52 || wangDist < 0.45) && elev < 20) {
             if (cDist <= 3) {
               r = 226; g = 238; b = 236;
               roughVal = 82;
-            } else if (cDist <= 9) {
-              r = Math.floor(194 + nFine * 12);
-              g = Math.floor(174 + nFine * 12);
-              b = Math.floor(132 + nFine * 10);
-              roughVal = 118;
+            } else if (cDist <= 10) {
+              r = Math.floor(196 + nFine * 12);
+              g = Math.floor(176 + nFine * 12);
+              b = Math.floor(134 + nFine * 10);
+              roughVal = 116;
             } else {
-              r = Math.floor(212 + nFine * 16 + grain * 6);
-              g = Math.floor(192 + nFine * 14 + grain * 6);
-              b = Math.floor(148 + nFine * 12);
+              r = Math.floor(216 + nFine * 16 + grain * 6);
+              g = Math.floor(196 + nFine * 14 + grain * 6);
+              b = Math.floor(152 + nFine * 12);
               roughVal = 198;
             }
+          } else if (dCheongnaLake < 0.65 && elev < 14) {
+            // Cheongna Central Lake Park water & canal plaza
+            const inWater = dCheongnaLake < 0.44 || (Math.abs(lat - 37.531) < 0.0018 && lng > 126.634 && lng < 126.666);
+            if (inWater) {
+              r = 34; g = 104; b = 136;
+              roughVal = 48;
+            } else {
+              r = Math.floor(58 + nFine * 16);
+              g = Math.floor(114 + nFine * 18);
+              b = Math.floor(62 + nFine * 10);
+              roughVal = 220;
+            }
+          } else if (isInnerPortPiers) {
+            // Incheon Inner Harbor shipping yards & container berths (strictly lng 126.585..126.628)
+            const lane = Math.floor(px * 0.16) % 2;
+            const yardHash = hash(Math.floor(px * 0.16), Math.floor(py * 0.16));
+            if (yardHash < 0.14) {
+              r = 160; g = 90; b = 68;
+              roughVal = 165;
+            } else if (yardHash < 0.25) {
+              r = 62; g = 104; b = 144;
+              roughVal = 165;
+            } else {
+              r = Math.floor(124 + lane * 8 + grain * 6);
+              g = Math.floor(128 + lane * 8 + grain * 6);
+              b = Math.floor(134 + lane * 8);
+              roughVal = 178;
+            }
           } else if (cDist <= 4) {
-            // Coastal riprap / basalt headland rim & seafoam edge
-            const foam = nFine > 0.58 && cDist <= 2;
+            const foam = nFine > 0.56 && cDist <= 2;
             if (foam) {
-              r = 212; g = 228; b = 235;
-              roughVal = 92;
+              r = 216; g = 232; b = 238;
+              roughVal = 90;
             } else {
               r = Math.floor(88 + nFine * 18 + grain * 8);
               g = Math.floor(94 + nFine * 16 + grain * 8);
               b = 92;
               roughVal = 185;
             }
-          } else if (elev > 145) {
-            // Rocky granite ridges
-            r = Math.floor(108 + nCoarse * 22 + nFine * 14 + grain * 7);
-            g = Math.floor(114 + nCoarse * 20 + nFine * 12 + grain * 7);
-            b = Math.floor(104 + nCoarse * 18);
-            roughVal = 212;
-          } else if (elev > 34) {
-            // Mountain forest canopy with rich organic variation
-            const canopy = nCoarse * 0.55 + nFine * 0.45;
-            r = Math.floor(38 + canopy * 34 + grain * 6);
-            g = Math.floor(80 + canopy * 44 + grain * 7);
-            b = Math.floor(40 + canopy * 22 + grain * 4);
-            roughVal = 232;
-          } else if (lng > 126.625 && elev < 26 + nCoarse * 8) {
-            // Incheon mainland urban districts (Cheongna / Port / Guwol)
-            const bx = Math.floor(px * 0.09);
-            const by = Math.floor(py * 0.09);
-            const subX = px * 0.09 - bx;
-            const subY = py * 0.09 - by;
-            const bHash = hash(bx, by);
-            if (subX < 0.14 || subY < 0.14) {
-              r = Math.floor(76 + grain * 6); g = Math.floor(80 + grain * 6); b = Math.floor(85 + grain * 6);
-              roughVal = 152;
-            } else if (bHash < 0.22) {
-              r = Math.floor(62 + nFine * 16); g = Math.floor(104 + nFine * 20); b = Math.floor(58 + nFine * 12);
-              roughVal = 224;
-            } else if (bHash < 0.65) {
-              r = Math.floor(116 + nFine * 18 + grain * 5);
-              g = Math.floor(122 + nFine * 16 + grain * 5);
-              b = Math.floor(128 + nFine * 16);
-              roughVal = 176;
-            } else {
-              r = Math.floor(128 + nFine * 16 + grain * 5);
-              g = Math.floor(134 + nFine * 16 + grain * 5);
-              b = Math.floor(142 + nFine * 14);
-              roughVal = 166;
-            }
           } else {
-            // Coastal lowlands, meadows & rural Yeongjong plains
-            const meadow = nCoarse * 0.5 + nFine * 0.5;
-            r = Math.floor(58 + meadow * 34 + grain * 6);
-            g = Math.floor(98 + meadow * 38 + grain * 6);
-            b = Math.floor(52 + meadow * 22 + grain * 4);
-            roughVal = 224;
+            // Smooth transition between urban/coastal lowlands and wooded mountain flanks + granite ridge crags
+            const urbanCeiling = 22 + nCoarse * 11;
+            const inSkyCity = lng > 126.526 && lng < 126.576 && lat > 37.480 && lat < 37.506 && elev < urbanCeiling;
+            const inUrbanZone = (lng > 126.622 && elev < urbanCeiling) || inSkyCity;
+
+            // Woodland canopy with subtle autumn oak accents
+            const canopy = nCoarse * 0.54 + nFine * 0.46;
+            const autumn = nCoarse > 0.58 ? 16 : 0;
+            let fR = 36 + autumn + canopy * 34 + grain * 5;
+            let fG = 78 + autumn * 0.35 + canopy * 40 + grain * 6;
+            let fB = 38 + canopy * 20 + grain * 4;
+
+            // Subtle granite crag blend strictly on steep slopes & high summit ridges (never flat brown caps)
+            const rockMix = Math.max(0, Math.min(0.82,
+              ((slope - 0.32) * 1.95 + Math.max(0, elev - 185) / 95) * (0.45 + nFine * 0.65)
+            ));
+            if (rockMix > 0.02) {
+              const rkR = 114 + nFine * 18 + grain * 6;
+              const rkG = 116 + nFine * 16 + grain * 6;
+              const rkB = 110 + nFine * 14;
+              fR = fR * (1 - rockMix) + rkR * rockMix;
+              fG = fG * (1 - rockMix) + rkG * rockMix;
+              fB = fB * (1 - rockMix) + rkB * rockMix;
+            }
+
+            if (inUrbanZone) {
+              const ux = px * COS_ML - py * SIN_ML;
+              const uy = px * SIN_ML + py * COS_ML;
+              const bScale = 0.22;
+              const bx = Math.floor(ux * bScale);
+              const by = Math.floor(uy * bScale);
+              const subX = ux * bScale - bx;
+              const subY = uy * bScale - by;
+              const bHash = hash(bx, by);
+              let uR, uG, uB, uRough;
+              if (subX < 0.16 || subY < 0.16) {
+                uR = 88 + grain * 5; uG = 92 + grain * 5; uB = 98 + grain * 5;
+                uRough = 156;
+              } else if (bHash < 0.25) {
+                uR = 56 + nFine * 16; uG = 104 + nFine * 18; uB = 52 + nFine * 12;
+                uRough = 224;
+              } else if (bHash < 0.65) {
+                uR = 132 + nFine * 14 + grain * 4;
+                uG = 136 + nFine * 14 + grain * 4;
+                uB = 142 + nFine * 12;
+                uRough = 176;
+              } else {
+                uR = 146 + nFine * 12 + grain * 4;
+                uG = 150 + nFine * 12 + grain * 4;
+                uB = 156 + nFine * 10;
+                uRough = 166;
+              }
+              const foothillT = Math.max(0, Math.min(1, (elev - (urbanCeiling - 7)) / 7));
+              r = Math.floor(uR * (1 - foothillT) + fR * foothillT);
+              g = Math.floor(uG * (1 - foothillT) + fG * foothillT);
+              b = Math.floor(uB * (1 - foothillT) + fB * foothillT);
+              roughVal = Math.round(uRough * (1 - foothillT) + 228 * foothillT);
+            } else if (elev < 16) {
+              // Yeongjongdo natural coastal agricultural meadows & foothills
+              const meadow = nCoarse * 0.5 + nFine * 0.5;
+              const mR = 52 + meadow * 30 + grain * 5;
+              const mG = 94 + meadow * 34 + grain * 5;
+              const mB = 48 + meadow * 20 + grain * 4;
+              const tHill = Math.max(0, Math.min(1, (elev - 9) / 7));
+              r = Math.floor(mR * (1 - tHill) + fR * tHill);
+              g = Math.floor(mG * (1 - tHill) + fG * tHill);
+              b = Math.floor(mB * (1 - tHill) + fB * tHill);
+              roughVal = 226;
+            } else {
+              r = Math.floor(fR);
+              g = Math.floor(fG);
+              b = Math.floor(fB);
+              roughVal = Math.round(228 - rockMix * 20);
+            }
           }
         }
 
@@ -750,7 +1005,7 @@
         } else {
           er = 228; eg = 196; eb = 176;
         }
-        const contourLine = Math.abs(Math.sin(elev * 0.12566)); // every 25m
+        const contourLine = Math.abs(Math.sin(elev * 0.12566));
         const cFac = (elev >= 1 && contourLine < 0.08) ? 0.86 : 1.0;
 
         eData[idx] = Math.min(255, Math.floor(er * shade * cFac));
@@ -833,7 +1088,6 @@
     fillQuadUV(nCtx, 0.62, -2.05, 1.15, -1.35, '#8c949e');
     fillQuadUV(nCtx, 0.72, 0.10, 1.15, 0.85, '#8c949e');
 
-    // Apron concrete expansion slab grid & aircraft parking bay markings
     for (let u = -0.68; u <= 0.92; u += 0.16) {
       strokeLineUV(nCtx, u, -1.30, u, 1.28, 'rgba(72, 80, 90, 0.28)', 0.7);
     }
@@ -841,7 +1095,6 @@
       strokeLineUV(nCtx, -0.76, v, 0.96, v, 'rgba(72, 80, 90, 0.28)', 0.7);
     }
 
-    // Yellow aircraft parking lead-in lines along T1, Concourse & T2 gates
     const gateStands = [
       ...[-0.36, -0.22, -0.08, 0.08, 0.24, 0.40, 0.56].map(u => [u, -0.82, u, -0.64]),
       ...[-0.30, -0.15, 0.00, 0.16, 0.32, 0.48, 0.62].map(u => [u, -0.24, u, -0.40]),
@@ -894,7 +1147,7 @@
       strokeLineUV(nCtx, u0, v0, u1, v1, '#facc15', 0.85);
     });
 
-    // 3D. 4 Main Runways with realistic shoulders, asphalt, touchdown rubber & white threshold piano keys
+    // 3D. 4 Main Runways
     AIRPORT_LAYOUT.runways.forEach((rw) => {
       const halfW = rw.widthKm * 0.5;
       fillQuadUV(nCtx, rw.u - halfW - 0.025, rw.vStart - 0.08, rw.u + halfW + 0.025, rw.vEnd + 0.08, '#4f5864');
@@ -902,7 +1155,6 @@
 
       strokeLineUV(nCtx, rw.u - halfW + 0.008, rw.vStart, rw.u - halfW + 0.008, rw.vEnd, '#e2e8f0', 1.1);
       strokeLineUV(nCtx, rw.u + halfW - 0.008, rw.vStart, rw.u + halfW - 0.008, rw.vEnd, '#e2e8f0', 1.1);
-
       strokeLineUV(nCtx, rw.u, rw.vStart + 0.16, rw.u, rw.vEnd - 0.16, '#f8fafc', 1.4, [6, 5]);
 
       for (let s = -3; s <= 3; s++) {
