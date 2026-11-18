@@ -51,6 +51,7 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 .rail-dest-btn[data-region="haeundae"].is-active { background: #e7f5fb; border-color: #bfe4f5; color: #0077b6; }
 .rail-dest-btn[data-region="gangneung"].is-active { background: #e8f6f4; border-color: #bfe6e0; color: #0f766e; }
 .rail-dest-btn[data-region="yeongam"].is-active { background: #fef2f2; border-color: #fca5a5; color: #dc2626; }
+.rail-dest-btn[data-region="danyang"].is-active { background: #eafaf5; border-color: #6ee7b7; color: #0d8a72; }
 .rail-icon { font-size: 17px; line-height: 1; }
 .rail-dest-btn small, .rail-tab-btn small, .rail-util-btn small { font-size: 10px; font-weight: 700; line-height: 1.1; white-space: nowrap; }
 
@@ -181,9 +182,6 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
   border-color: #6ee7b7;
   color: #0f766e;
 }
-.dest-tab[data-region="yeongam"] {
-  grid-column: 1 / -1;
-}
 .dest-tab[data-region="yeongam"].is-active {
   background: #fef2f2;
   border-color: #fca5a5;
@@ -191,6 +189,14 @@ button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visibl
 }
 .dest-tab[data-region="yeongam"].is-active .dest-tab-text small {
   color: #991b1b;
+}
+.dest-tab[data-region="danyang"].is-active {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #0d8a72;
+}
+.dest-tab[data-region="danyang"].is-active .dest-tab-text small {
+  color: #0f766e;
 }
 .dest-tab-icon { font-size: 16px; line-height: 1; flex: none; }
 .dest-tab-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }

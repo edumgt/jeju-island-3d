@@ -1,6 +1,7 @@
 // Jeollanam-do Yeongam Korea International Circuit (KIC) Sports Car Track & Coastal Terrain Generator
-// Covers the 5.615km F1/GT Grand Prix Circuit, Permanent Loop, Karting Track, Pit/Grandstands,
-// Yeongsanho Waterfront Marina, Samho Peninsula, and Eunjeoksan / Wolchulsan Mountain Backdrop.
+// High-fidelity depiction of Hermann Tilke's 5.615km 18-Turn FIA Grade-1 Circuit (Counter-Clockwise),
+// 3.045km Permanent Loop, Pit/Paddock Complex, CIK-FIA Karting Circuit, Yeongamho Yacht Marina,
+// Samho Reclaimed Peninsula, and Eunjeoksan / Wolchulsan Granite Mountain Backdrop.
 (() => {
   'use strict';
 
@@ -12,8 +13,10 @@
   };
 
   // Samho Peninsula & Yeongsanho / Yeongamho shoreline + eastern foothill horizon (lng, lat)
+  // Indices 0..9: Western Samho seawall & Northern Yeongsanho Estuary
+  // Indices 10..13: Eastern inland mountain backdrop (Eunjeoksan / Wolchulsan)
+  // Indices 14..21: Southern Yeongamho Lake & KIC Marina waterfront coast
   const YEONGAM_OUTLINE = [
-    // Western seawall & Yeongam Bay coast (south -> north)
     [126.3920, 34.7250],
     [126.3905, 34.7350],
     [126.3925, 34.7460],
@@ -34,70 +37,75 @@
     [126.4530, 34.7185],
     [126.4360, 34.7215],
     [126.4255, 34.7252], // East Marina headland
-    [126.4180, 34.7276], // KIC Marina Lagoon cove
-    [126.4105, 34.7268],
+    [126.4182, 34.7282], // KIC Marina Yacht Basin cove
+    [126.4132, 34.7284], // Inner Marina quay right below Harbor sector
+    [126.4085, 34.7266],
     [126.4005, 34.7245],
     [126.3920, 34.7250]
   ];
 
-  // Korea International Circuit (KIC) 5.615 km 18-turn Grand Prix loop [lat, lng]
+  // Korea International Circuit (KIC) 5.615 km 18-turn Grand Prix loop [lat, lng] (True Jordan Curve, Zero Crossings)
   const KIC_GP_LOOP = [
-    [34.7366, 126.4122], // Start/Finish Grid
-    [34.7376, 126.4152], // Main Straight mid
-    [34.7386, 126.4186], // Main Straight braking zone
-    [34.7393, 126.4202], // Turn 1 Hairpin apex
-    [34.7401, 126.4192], // Turn 2 exit onto 1.2km Back Straight
-    [34.7412, 126.4136], // 1.2km Straight mid
-    [34.7426, 126.4062], // Turn 3 braking zone
-    [34.7427, 126.4046], // Turn 3 Hairpin apex
-    [34.7412, 126.4049], // Turn 4 entry
-    [34.7400, 126.4070], // Turn 4-5 S-curve
-    [34.7407, 126.4098], // Turn 5 apex
-    [34.7395, 126.4124], // Turn 6 sweeper
-    [34.7386, 126.4152], // Turn 7 high-speed kink
-    [34.7372, 126.4176], // Turn 8 entry
-    [34.7358, 126.4204], // Turn 9 stadium approach
-    [34.7346, 126.4232], // Turn 10 tight bend
-    [34.7327, 126.4242], // Turn 11 Marina East hairpin
-    [34.7310, 126.4222], // Turn 12 Marina Waterfront straight
-    [34.7308, 126.4184], // Turn 13 Harbor sweep
-    [34.7324, 126.4154], // Turn 14 Paddock chicane
-    [34.7312, 126.4116], // Turn 15 Marina West bend
-    [34.7322, 126.4084], // Turn 16 South hairpin
-    [34.7344, 126.4088], // Turn 17 sweeping double-apex
-    [34.7357, 126.4102], // Turn 18 final corner exit
-    [34.7366, 126.4122]  // Close loop back to Start/Finish
+    [34.7358, 126.4114], // Start/Finish Straight SW entry
+    [34.7372, 126.4152], // Main Straight mid (between Main Grandstand NW & Pit Garages SE)
+    [34.7385, 126.4188], // Main Straight Hanok Overpass & T1 braking zone
+    [34.7394, 126.4204], // Turn 1 tight left-hand corner apex
+    [34.7405, 126.4195], // Turn 2 accelerating kink onto 1.2km Back Straight
+    [34.7414, 126.4146], // 1.2km Straight east-mid
+    [34.7422, 126.4094], // 1.2km Straight west-mid (320 km/h top-speed zone)
+    [34.7428, 126.4056], // Turn 3 heavy braking zone (150m-50m boards)
+    [34.7427, 126.4042], // Turn 3 Hairpin apex
+    [34.7410, 126.4046], // Turn 4 90-deg left-right entry
+    [34.7413, 126.4078], // Turn 5 technical crest apex
+    [34.7397, 126.4096], // Turn 6 infield corner (Short-Circuit split)
+    [34.7381, 126.4078], // Turn 7 high-speed Esses entry (230 km/h)
+    [34.7359, 126.4080], // Turn 8 fast switchback west of Main Straight
+    [34.7337, 126.4084], // Turn 9 fast sweeper descending toward Harbor
+    [34.7318, 126.4102], // Turn 10 Harbor West braking corner
+    [34.7322, 126.4136], // Turn 11 Harbor switchback
+    [34.7308, 126.4172], // Turn 12 Marina Waterfront seawall approach
+    [34.7310, 126.4222], // Turn 13 Marina East Waterfront Corner (kic_marina)
+    [34.7329, 126.4240], // Turn 14 East Harbor Hairpin
+    [34.7343, 126.4216], // Turn 15 Stadium South approach
+    [34.7336, 126.4178], // Turn 16 South Paddock sweeper (well south of Pit Garages)
+    [34.7338, 126.4138], // Turn 17 sweeping double-apex right
+    [34.7346, 126.4106], // Turn 18 final corner & Pit-In split
+    [34.7358, 126.4114]  // Close loop smoothly onto Main Straight
   ];
 
-  // Permanent Short Circuit Connector (Infield shortcut)
+  // 3.045 km Permanent National Circuit Connector (links Turn 6 infield directly onto Main Straight start)
   const KIC_SHORT_CONNECTOR = [
-    [34.7404, 126.4158],
-    [34.7385, 126.4140],
-    [34.7369, 126.4130]
+    [34.7397, 126.4096],
+    [34.7378, 126.4104],
+    [34.7362, 126.4122]
   ];
 
-  // Pit Lane parallel to Main Straight
+  // Pit Lane parallel to Main Straight (Pit-In -> 24 Garages -> Pit-Out inside T1)
   const KIC_PIT_LANE = [
-    [34.7358, 126.4120],
-    [34.7367, 126.4152],
-    [34.7378, 126.4186],
-    [34.7387, 126.4196]
+    [34.7351, 126.4118],
+    [34.7359, 126.4138],
+    [34.7368, 126.4163],
+    [34.7378, 126.4190],
+    [34.7390, 126.4201]
   ];
 
-  // KIC Karting & Driving Experience Track
+  // CIK-FIA International Karting & Driving Experience Multi-Hairpin Track
   const KIC_KART_TRACK = [
-    [34.7340, 126.4046],
-    [34.7346, 126.4066],
-    [34.7332, 126.4070],
-    [34.7324, 126.4052],
-    [34.7330, 126.4040],
-    [34.7340, 126.4046]
+    [34.7341, 126.4040],
+    [34.7348, 126.4063],
+    [34.7341, 126.4069],
+    [34.7335, 126.4054],
+    [34.7330, 126.4067],
+    [34.7322, 126.4062],
+    [34.7324, 126.4042],
+    [34.7332, 126.4035],
+    [34.7341, 126.4040]
   ];
 
   const YEONGAM_ROADS = [
-    // F1-ro Expressway / Circuit Perimeter Access Road
+    // F1-ro Expressway / Circuit Main Boulevard
     {
-      name: '에프원로 (영암 서킷 진입로)',
+      name: '에프원로 (영암 국제서킷 진입대로)',
       type: 'motorway',
       points: [
         [34.7695, 126.4580],
@@ -108,20 +116,20 @@
         [34.7275, 126.4325]
       ]
     },
-    // Daebul Waterfront Boulevard (Coastal Scenic Drive along Samho Marina)
+    // Daebul Waterfront & Yeongamho Marina Scenic Drive
     {
-      name: '대불산단·영암호 해안도로',
+      name: '영암호·마리나 수변해안도로',
       type: 'primary',
       points: [
         [34.7268, 126.3945],
         [34.7285, 126.4080],
-        [34.7286, 126.4210],
+        [34.7290, 126.4205],
         [34.7255, 126.4360],
         [34.7222, 126.4540],
         [34.7210, 126.4760]
       ]
     },
-    // Samho Coastal Perimeter Avenue
+    // Samho Coastal Perimeter Trunk Road
     {
       name: '삼호 중앙대로',
       type: 'trunk',
@@ -135,17 +143,17 @@
     }
   ];
 
-  // Top 3 spatially separated presets so initial labels frame the track cleanly
+  // Top 3 spatially separated presets frame Main Grandstand/Hanok Bridge, Marina Sector, and Wolchulsan ridge
   const YEONGAM_PRESETS = [
-    { id: 'kic_grandstand', name: 'KIC 메인 그랜드스탠드', category: '서킷·관람석', icon: '🏁', lat: 34.7376, lng: 126.4152 },
-    { id: 'kic_marina', name: 'KIC 마리나 워터프론트 코너', category: '레이싱 코스', icon: '🏎', lat: 34.7310, lng: 126.4222 },
-    { id: 'yeongsanho_bay', name: '은적산·영암호 전망능선', category: '자연·전망', icon: '⛰', lat: 34.7520, lng: 126.4765 },
-    { id: 'kic_paddock', name: '피트 빌딩 · 레이스 컨트롤', category: '패독·타워', icon: '🗼', lat: 34.7364, lng: 126.4162 },
-    { id: 'kic_turn3', name: '1.2km 직선 · 턴3 헤어핀', category: '추월 구간', icon: '⚡', lat: 34.7426, lng: 126.4052 },
-    { id: 'kic_kart', name: 'KIC 카트 경기장 · 드라이빙센터', category: '체험·카트', icon: '🛞', lat: 34.7334, lng: 126.4055 },
-    { id: 'samho_marina', name: '영암호 요트 마리나항', category: '항구·바다', icon: '⛵', lat: 34.7276, lng: 126.4155 },
-    { id: 'yeongsan_estuary', name: '영산강 하구둑 · 수변공원', category: '방조제·도로', icon: '🌉', lat: 34.7740, lng: 126.4530 },
-    { id: 'samho_cape', name: '삼호 서해 전망 곶', category: '해안 풍경', icon: '🌊', lat: 34.7640, lng: 126.4050 }
+    { id: 'kic_grandstand', name: 'KIC 메인 그랜드스탠드 · 한옥육교', category: '서킷·상징건축', icon: '🏁', lat: 34.7374, lng: 126.4152 },
+    { id: 'kic_marina', name: 'KIC 마리나 워터프론트 코너 (T11~13)', category: '하버 레이싱구간', icon: '🏎', lat: 34.7310, lng: 126.4222 },
+    { id: 'yeongsanho_bay', name: '은적산 · 월출산 전망능선', category: '화강암 명산조망', icon: '⛰', lat: 34.7520, lng: 126.4765 },
+    { id: 'kic_paddock', name: '피트 빌딩 · 레이스 컨트롤 타워', category: '패독·팀 개러지', icon: '🗼', lat: 34.7358, lng: 126.4160 },
+    { id: 'kic_turn3', name: '1.2km 백스트레이트 · 턴3 헤어핀', category: '최고속 추월구간', icon: '⚡', lat: 34.7427, lng: 126.4046 },
+    { id: 'kic_kart', name: 'KIC 국제 카트장 · 드라이빙센터', category: 'CIK-FIA 카트트랙', icon: '🛞', lat: 34.7335, lng: 126.4052 },
+    { id: 'samho_marina', name: '영암호 요트 마리나 계류장', category: '수변 요트항', icon: '⛵', lat: 34.7280, lng: 126.4158 },
+    { id: 'yeongsan_estuary', name: '영산강 하구둑 · 수변공원', category: '방조제·전망', icon: '🌉', lat: 34.7740, lng: 126.4530 },
+    { id: 'samho_cape', name: '삼호 서해 해안 전망곶', category: '해안 풍경', icon: '🌊', lat: 34.7640, lng: 126.4050 }
   ];
 
   function inYeongamLand(lng, lat) {
@@ -158,6 +166,41 @@
       }
     }
     return inside;
+  }
+
+  // Evaluate closed Catmull-Rom spline matching Three.js CatmullRomCurve3(tension=0.35)
+  function sampleClosedSpline(rawLoop, samples) {
+    const pts = rawLoop.length > 2 ? rawLoop.slice(0, -1) : rawLoop.slice();
+    const n = pts.length;
+    const out = [];
+    const tension = 0.35;
+    for (let s = 0; s <= samples; s++) {
+      const u = (s / samples) * n;
+      const idx = Math.floor(u) % n;
+      const t = u - Math.floor(u);
+      const p0 = pts[(idx - 1 + n) % n];
+      const p1 = pts[idx];
+      const p2 = pts[(idx + 1) % n];
+      const p3 = pts[(idx + 2) % n];
+
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const m1Lat = tension * (p2[0] - p0[0]);
+      const m1Lng = tension * (p2[1] - p0[1]);
+      const m2Lat = tension * (p3[0] - p1[0]);
+      const m2Lng = tension * (p3[1] - p1[1]);
+
+      const h00 = 2 * t3 - 3 * t2 + 1;
+      const h10 = t3 - 2 * t2 + t;
+      const h01 = -2 * t3 + 3 * t2;
+      const h11 = t3 - t2;
+
+      out.push([
+        h00 * p1[0] + h10 * m1Lat + h01 * p2[0] + h11 * m2Lat,
+        h00 * p1[1] + h10 * m1Lng + h01 * p2[1] + h11 * m2Lng
+      ]);
+    }
+    return out;
   }
 
   function createYeongamAssets() {
@@ -227,6 +270,9 @@
       return minDist;
     }
 
+    const smoothTrackPts = sampleClosedSpline(KIC_GP_LOOP, 320);
+    const smoothKartPts = sampleClosedSpline(KIC_KART_TRACK, 120);
+
     // Build 2048x2048 high-res land mask
     const fullMaskCanvas = document.createElement('canvas');
     fullMaskCanvas.width = W;
@@ -261,7 +307,7 @@
     mCtx.fill();
     const maskPixels = mCtx.getImageData(0, 0, HW, HH).data;
 
-    // Paint Track Surface & Runoff Feature Layer on an offscreen 2048x2048 canvas for crisp anti-aliased motorsport asphalt
+    // Offscreen 2048x2048 FIA Grade-1 Motorsport Surface & Paddock Apron Layer
     const trackOverlayCanvas = document.createElement('canvas');
     trackOverlayCanvas.width = W;
     trackOverlayCanvas.height = H;
@@ -274,7 +320,7 @@
       ];
     }
 
-    function strokeTrackPath(pts, widthPx, color, closed, dashed) {
+    function strokeTrackPath(pts, widthPx, color, closed, dashed, lineCap) {
       tCtx.save();
       tCtx.beginPath();
       pts.forEach(([lat, lng], idx) => {
@@ -283,7 +329,7 @@
         else tCtx.lineTo(x, y);
       });
       if (closed) tCtx.closePath();
-      tCtx.lineCap = 'round';
+      tCtx.lineCap = lineCap || 'round';
       tCtx.lineJoin = 'round';
       tCtx.lineWidth = widthPx;
       tCtx.strokeStyle = color;
@@ -292,83 +338,279 @@
       tCtx.restore();
     }
 
-    // 1. FIA painted turquoise-blue & red runoff aprons around key corners
-    strokeTrackPath(KIC_GP_LOOP, 28, 'rgba(37, 99, 235, 0.90)', true);
-    strokeTrackPath(KIC_GP_LOOP, 22, 'rgba(218, 206, 188, 0.96)', true); // Gravel safety trap border
-    // 2. Red-white FIA apex kerbs base
-    strokeTrackPath(KIC_GP_LOOP, 15, '#dc2626', true);
-    strokeTrackPath(KIC_GP_LOOP, 15, '#f8fafc', true, [7, 7]);
-    // 3. Main F1 asphalt surface + Short Connector + Kart Track + Pit Apron
-    strokeTrackPath(KIC_SHORT_CONNECTOR, 14, '#cbd5e1', false);
-    strokeTrackPath(KIC_SHORT_CONNECTOR, 10, '#2a3038', false);
-    strokeTrackPath(KIC_KART_TRACK, 10, '#e2e8f0', true);
-    strokeTrackPath(KIC_KART_TRACK, 7, '#334155', true);
-    strokeTrackPath(KIC_GP_LOOP, 11.5, '#252a32', true);
-    strokeTrackPath(KIC_PIT_LANE, 13, '#3b424d', false);
-    // 4. Crisp white track racing edge lines & start/finish grid marker
-    strokeTrackPath(KIC_GP_LOOP, 1.5, 'rgba(255,255,255,0.65)', true);
+    // Helper: draw rotated rectangle in lat/lng center with heading
+    function fillOrientedRect(lat, lng, lenPx, widPx, angleRad, fillStyle, strokeStyle) {
+      const [cx, cy] = toPx(lat, lng);
+      tCtx.save();
+      tCtx.translate(cx, cy);
+      tCtx.rotate(angleRad);
+      tCtx.fillStyle = fillStyle;
+      tCtx.fillRect(-lenPx * 0.5, -widPx * 0.5, lenPx, widPx);
+      if (strokeStyle) {
+        tCtx.strokeStyle = strokeStyle;
+        tCtx.lineWidth = 1.4;
+        tCtx.strokeRect(-lenPx * 0.5, -widPx * 0.5, lenPx, widPx);
+      }
+      tCtx.restore();
+    }
+
+    const [stX1, stY1] = toPx(34.7358, 126.4114);
+    const [stX2, stY2] = toPx(34.7385, 126.4188);
+    const mainStraightPxAngle = Math.atan2(stY2 - stY1, stX2 - stX1);
+
+    // A. Paddock Team Compound, Spectator Concourse & Parking Aprons
+    fillOrientedRect(34.7356, 126.4162, 124, 42, mainStraightPxAngle, 'rgba(190, 198, 207, 0.96)', 'rgba(100, 116, 139, 0.55)');
+    for (let b = -5; b <= 5; b++) {
+      const frac = b * 0.00040;
+      fillOrientedRect(
+        34.7353 + frac * 0.34,
+        126.4163 + frac * 0.94,
+        6.2,
+        16,
+        mainStraightPxAngle,
+        'rgba(148, 163, 184, 0.68)'
+      );
+    }
+    // Main Grandstand Rear Spectator Plaza & Parking Lots (NW of Main Straight)
+    fillOrientedRect(34.7388, 126.4138, 130, 32, mainStraightPxAngle, 'rgba(203, 213, 225, 0.92)', 'rgba(148, 163, 184, 0.5)');
+    fillOrientedRect(34.7400, 126.4128, 92, 22, mainStraightPxAngle, 'rgba(71, 85, 105, 0.85)', 'rgba(226, 232, 240, 0.55)');
+    // Karting Paddock Apron
+    fillOrientedRect(34.7345, 126.4050, 36, 17, -0.18, 'rgba(196, 204, 214, 0.92)');
+
+    // B. Corner-Localized Smooth Silica Gravel Traps & FIA Cobalt-Blue / Crimson-Red Runoff Crescents
+    const nPts = smoothTrackPts.length - 1;
+    const curvatures = new Float32Array(nPts);
+    const pxPts = smoothTrackPts.map(([lat, lng]) => toPx(lat, lng));
+    for (let i = 0; i < nPts; i++) {
+      const prev = pxPts[(i - 4 + nPts) % nPts];
+      const curr = pxPts[i];
+      const next = pxPts[(i + 4) % nPts];
+      const v1x = curr[0] - prev[0], v1y = curr[1] - prev[1];
+      const v2x = next[0] - curr[0], v2y = next[1] - curr[1];
+      const l1 = Math.hypot(v1x, v1y) || 1;
+      const l2 = Math.hypot(v2x, v2y) || 1;
+      curvatures[i] = (v1x * v2y - v1y * v2x) / (l1 * l2);
+    }
+
+    // Helper: stroke contiguous corner-outside offset arcs (clean smooth crescents, zero spiky dots!)
+    function strokeCornerOuterCrescents(minCurv, normalOffsetPx, lineWidthPx, strokeColor, dashPattern) {
+      tCtx.save();
+      tCtx.lineCap = 'round';
+      tCtx.lineJoin = 'round';
+      tCtx.lineWidth = lineWidthPx;
+      tCtx.strokeStyle = strokeColor;
+      if (dashPattern) tCtx.setLineDash(dashPattern);
+
+      let inArc = false;
+      let prevSign = 0;
+      tCtx.beginPath();
+      for (let step = 0; step <= nPts + 4; step++) {
+        const i = step % nPts;
+        const k = curvatures[i];
+        const absK = Math.abs(k);
+        const signOut = k >= 0 ? 1 : -1;
+        if (absK >= minCurv && (!inArc || signOut === prevSign)) {
+          const curr = pxPts[i];
+          const next = pxPts[(i + 1) % nPts];
+          const dx = next[0] - curr[0], dy = next[1] - curr[1];
+          const segLen = Math.hypot(dx, dy) || 1;
+          const ox = (dy / segLen) * signOut * normalOffsetPx;
+          const oy = (-dx / segLen) * signOut * normalOffsetPx;
+          if (!inArc) {
+            tCtx.moveTo(curr[0] + ox, curr[1] + oy);
+            inArc = true;
+            prevSign = signOut;
+          } else {
+            tCtx.lineTo(curr[0] + ox, curr[1] + oy);
+          }
+        } else if (inArc) {
+          tCtx.stroke();
+          tCtx.beginPath();
+          inArc = false;
+        }
+      }
+      if (inArc) tCtx.stroke();
+      tCtx.restore();
+    }
+
+    // 1) Smooth outer silica gravel traps on heavy braking & high-speed sweepers
+    strokeCornerOuterCrescents(0.135, 19.5, 13.5, 'rgba(224, 211, 186, 0.96)', null);
+    // 2) Smooth FIA Cobalt-Blue asphalt runoff apron inside the gravel traps
+    strokeCornerOuterCrescents(0.085, 11.8, 9.5, 'rgba(29, 78, 216, 0.94)', null);
+    // 3) Smooth FIA Crimson-Red & White high-grip painted runoff band
+    strokeCornerOuterCrescents(0.095, 9.2, 3.8, 'rgba(220, 38, 38, 0.92)', [10, 7]);
+
+    // C. Track Verge Shoulders & Corner-Only Red-White Serrated FIA Kerbs
+    strokeTrackPath(smoothTrackPts, 17.5, 'rgba(71, 85, 105, 0.92)', true); // Asphalt safety shoulder
+    for (let i = 0; i < nPts; i++) {
+      const k = curvatures[i];
+      const absK = Math.abs(k);
+      // Check nearby exit curvature too so exit kerbs extend slightly onto corner exits
+      const prevK = Math.abs(curvatures[(i - 5 + nPts) % nPts]);
+      if (absK < 0.075 && prevK < 0.12) continue;
+      const pA = pxPts[i];
+      const pB = pxPts[(i + 1) % nPts];
+      const dx = pB[0] - pA[0], dy = pB[1] - pA[1];
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const isWhite = (i & 1) === 0;
+      const kerbColor = isWhite ? '#f8fafc' : '#dc2626';
+
+      // Inside apex kerb + outside exit kerb
+      [-6.8, 6.8].forEach((offsetPx) => {
+        tCtx.strokeStyle = kerbColor;
+        tCtx.lineWidth = 2.8;
+        tCtx.beginPath();
+        tCtx.moveTo(pA[0] + nx * offsetPx, pA[1] + ny * offsetPx);
+        tCtx.lineTo(pB[0] + nx * offsetPx, pB[1] + ny * offsetPx);
+        tCtx.stroke();
+      });
+    }
+
+    // D. Secondary Tracks: Permanent Short-Circuit Connector, CIK-FIA Karting Loop & Pit Lane
+    strokeTrackPath(KIC_SHORT_CONNECTOR, 14.5, '#64748b', false, null, 'butt');
+    strokeTrackPath(KIC_SHORT_CONNECTOR, 10.5, '#272d36', false, null, 'butt');
+
+    strokeTrackPath(smoothKartPts, 10.5, '#2563eb', true);
+    strokeTrackPath(smoothKartPts, 8.2, '#dc2626', true, [4, 4]);
+    strokeTrackPath(smoothKartPts, 6.4, '#2d3540', true);
+
+    // Pit lane fast lane (cobalt blue edge) + pit apron
+    strokeTrackPath(KIC_PIT_LANE, 12.5, '#1d4ed8', false, null, 'butt');
+    strokeTrackPath(KIC_PIT_LANE, 9.2, '#363e4a', false, null, 'butt');
+
+    // E. Main FIA Grade-1 Basalt-Aggregate Asphalt Ribbon
+    strokeTrackPath(smoothTrackPts, 12.6, '#262b33', true);
+
+    // F. Darkened Rubbered-In Racing Line & Heavy Braking Rubber Marks (T1, T3, T10, T16)
+    tCtx.save();
+    for (let i = 0; i < nPts; i++) {
+      const pA = pxPts[i];
+      const pB = pxPts[(i + 1) % nPts];
+      const nextK = Math.abs(curvatures[(i + 6) % nPts]);
+      const currK = Math.abs(curvatures[i]);
+      const rubberAlpha = Math.min(0.52, 0.16 + nextK * 0.85 + currK * 0.45);
+      tCtx.strokeStyle = `rgba(12, 15, 20, ${rubberAlpha.toFixed(3)})`;
+      tCtx.lineWidth = 4.2;
+      tCtx.beginPath();
+      tCtx.moveTo(pA[0], pA[1]);
+      tCtx.lineTo(pB[0], pB[1]);
+      tCtx.stroke();
+    }
+    tCtx.restore();
+
+    // G. Dual Crisp White Track-Limit Edge Stripes (Left & Right edges, NOT center line!)
+    ['left', 'right'].forEach((side) => {
+      const sign = side === 'left' ? -5.6 : 5.6;
+      tCtx.save();
+      tCtx.beginPath();
+      for (let i = 0; i <= nPts; i++) {
+        const curr = pxPts[i % nPts];
+        const next = pxPts[(i + 1) % nPts];
+        const dx = next[0] - curr[0], dy = next[1] - curr[1];
+        const len = Math.hypot(dx, dy) || 1;
+        const ox = (-dy / len) * sign;
+        const oy = (dx / len) * sign;
+        if (i === 0) tCtx.moveTo(curr[0] + ox, curr[1] + oy);
+        else tCtx.lineTo(curr[0] + ox, curr[1] + oy);
+      }
+      tCtx.closePath();
+      tCtx.strokeStyle = 'rgba(248, 250, 252, 0.86)';
+      tCtx.lineWidth = 1.15;
+      tCtx.stroke();
+      tCtx.restore();
+    });
+
+    // H. Start/Finish Line & 16-Car Staggered Starting Grid Boxes on Main Straight
+    fillOrientedRect(34.7370, 126.4147, 3.2, 12.2, mainStraightPxAngle, '#f8fafc');
+    for (let g = 0; g < 16; g++) {
+      const backFrac = (g + 1.5) / 19;
+      const gLat = 34.7370 - backFrac * 0.00105;
+      const gLng = 126.4147 - backFrac * 0.00288;
+      const lateralSign = (g % 2 === 0) ? -1 : 1;
+      const perpLat = Math.cos(mainStraightPxAngle) * 0.000075 * lateralSign;
+      const perpLng = -Math.sin(mainStraightPxAngle) * 0.000085 * lateralSign;
+      fillOrientedRect(gLat + perpLat, gLng + perpLng, 2.4, 2.2, mainStraightPxAngle, 'rgba(255,255,255,0.0)', 'rgba(248,250,252,0.84)');
+    }
+
     const trackPixels = tCtx.getImageData(0, 0, W, H).data;
 
-    // Geological Elevation Model (meters, max ~820m at eastern Wolchulsan/Eunjeoksan backdrop)
+    // Geological & Motorsport Engineered Elevation Model (meters, max 850m encoded in 16-bit RG)
     function calculateElevation(lat, lng) {
       const nX = (lng - BOUNDS.west) * 32;
       const nY = (lat - BOUNDS.south) * 32;
       const ridgeDetail = ridgedFbm(nX * 0.65 + 2.4, nY * 0.65 + 1.1, 4);
       const valleyFbm = fbm(nX * 1.1, nY * 1.1, 3);
 
-      // Reclaimed Samho plain base (~8.5m)
-      let h = 8.5 + valleyFbm * 4.5;
+      // Reclaimed Samho tidal plain base (~8.2m)
+      let h = 8.2 + valleyFbm * 3.8;
 
-      // Circuit Complex flat engineered terrace (9.2m) around KIC center [34.7365, 126.4145]
       const dCircuit = distKm(lat, lng, 34.7365, 126.4145);
-      const dTrack = distToPolylineKm(lat, lng, KIC_GP_LOOP);
-      const dKart = distToPolylineKm(lat, lng, KIC_KART_TRACK);
+      const dTrack = distToPolylineKm(lat, lng, smoothTrackPts);
+      const dKart = distToPolylineKm(lat, lng, smoothKartPts);
 
-      // Gentle Samho rolling pine hills in NW Samho Cape
+      // NW Samho Coastal Pine Hills
       const dSamhoHill = distKm(lat, lng, 34.7600, 126.4125);
-      if (dSamhoHill < 1.8) {
-        const f = Math.max(0, 1 - dSamhoHill / 1.8);
-        h = Math.max(h, 12 + 125 * Math.pow(f, 1.65) * (0.72 + ridgeDetail * 0.36));
+      if (dSamhoHill < 1.85) {
+        const f = Math.max(0, 1 - dSamhoHill / 1.85);
+        h = Math.max(h, 12 + 128 * Math.pow(f, 1.62) * (0.72 + ridgeDetail * 0.36));
       }
 
-      // Central-North Green Park Ridge behind KIC Back Straight (viewing grandstand hill)
+      // Central-North Green Park Ridge north of KIC 1.2km Back Straight
       const dNorthRidge = distKm(lat, lng, 34.7560, 126.4320);
-      if (dNorthRidge < 2.2) {
-        const f = Math.max(0, 1 - dNorthRidge / 2.2);
-        h = Math.max(h, 14 + 175 * Math.pow(f, 1.55) * (0.70 + ridgeDetail * 0.38));
+      if (dNorthRidge < 2.25) {
+        const f = Math.max(0, 1 - dNorthRidge / 2.25);
+        h = Math.max(h, 14 + 182 * Math.pow(f, 1.54) * (0.70 + ridgeDetail * 0.38));
       }
 
-      // Dramatic Eastern Mountain Backdrop: Eunjeoksan (389m) & Wolchulsan rocky silhouette ridge (up to 760m!)
+      // Eastern Granite Mountain Backdrop: Eunjeoksan (389m) & Wolchulsan Craggy Peaks (up to 720m)
       let peak = 0;
       const dEunjeok = distKm(lat, lng, 34.7520, 126.4765);
-      if (dEunjeok < 3.4) {
-        const f = Math.max(0, 1 - dEunjeok / 3.4);
-        peak = Math.max(peak, 490 * Math.pow(f, 1.48) * (0.74 + ridgeDetail * 0.34));
+      if (dEunjeok < 3.45) {
+        const f = Math.max(0, 1 - dEunjeok / 3.45);
+        peak = Math.max(peak, 495 * Math.pow(f, 1.46) * (0.72 + ridgeDetail * 0.36));
       }
       const dWolchulNorth = distKm(lat, lng, 34.7660, 126.4840);
-      if (dWolchulNorth < 2.8) {
-        const f = Math.max(0, 1 - dWolchulNorth / 2.8);
-        peak = Math.max(peak, 680 * Math.pow(f, 1.42) * (0.76 + ridgeDetail * 0.34));
+      if (dWolchulNorth < 2.9) {
+        const f = Math.max(0, 1 - dWolchulNorth / 2.9);
+        peak = Math.max(peak, 710 * Math.pow(f, 1.40) * (0.75 + ridgeDetail * 0.35));
       }
       const dWolchulSouth = distKm(lat, lng, 34.7350, 126.4810);
-      if (dWolchulSouth < 3.0) {
-        const f = Math.max(0, 1 - dWolchulSouth / 3.0);
-        peak = Math.max(peak, 560 * Math.pow(f, 1.45) * (0.74 + ridgeDetail * 0.34));
+      if (dWolchulSouth < 3.05) {
+        const f = Math.max(0, 1 - dWolchulSouth / 3.05);
+        peak = Math.max(peak, 575 * Math.pow(f, 1.44) * (0.73 + ridgeDetail * 0.35));
       }
       h = Math.max(h, peak);
 
-      // Strictly level the entire Motorsport Circuit Platform (9.2m) so track & buildings sit level
-      if (dCircuit < 1.35 || dTrack < 0.28 || dKart < 0.18) {
+      // Authentic KIC Circuit Grade:
+      // Real KIC rises gently toward Turns 3-6 northern permanent crest (~12.4m) and slopes softly toward Marina (~7.2m),
+      // while keeping the Main Straight / Paddock strictly planar (~9.2m) so grandstands and garages sit dead-flush!
+      if (dCircuit < 1.38 || dTrack < 0.28 || dKart < 0.18) {
+        const northSlope = Math.max(-2.0, Math.min(3.2, (lat - 34.7368) * 420));
+        const dMainStraight = distKm(lat, lng, 34.7372, 126.4154);
+        const padFactor = Math.max(0, Math.min(1, (dMainStraight - 0.34) / 0.28));
+        let targetGrade = 9.2 + northSlope * padFactor;
+
+        // Subtle spectator grass viewing berm outside Turn 4-5 northern hillside (away from tarmac!)
+        const dBerm = distKm(lat, lng, 34.7444, 126.4115);
+        if (dBerm < 0.26 && dTrack > 0.09) {
+          const bf = (1 - dBerm / 0.26) * Math.min(1, (dTrack - 0.09) / 0.06);
+          targetGrade += 9.5 * bf * bf;
+        }
+
         const padDist = Math.min(dTrack, dKart);
-        const flatBlend = dCircuit < 1.05 || padDist < 0.16
+        const flatBlend = (dCircuit < 1.06 || padDist < 0.16)
           ? 0
-          : Math.min(1, Math.max(0, (Math.min(dCircuit - 1.05, padDist - 0.16)) / 0.25));
-        h = 9.2 + (h - 9.2) * flatBlend;
+          : Math.min(1, Math.max(0, (Math.min(dCircuit - 1.06, padDist - 0.16)) / 0.26));
+        h = targetGrade + (h - targetGrade) * flatBlend;
       }
 
-      // Keep Marina Waterfront seawall level (~4.5m)
-      const dMarina = distKm(lat, lng, 34.7276, 126.4160);
-      if (dMarina < 0.35) h = Math.min(h, 5.2);
+      // Marina Waterfront Seawall Quay (~5.2m) right above Yeongamho Yacht Basin
+      const dMarina = distKm(lat, lng, 34.7284, 126.4162);
+      if (dMarina < 0.34 && dTrack > 0.06) {
+        const mf = Math.min(1, (dTrack - 0.06) / 0.12);
+        h = h * (1 - mf) + Math.min(h, 5.4) * mf;
+      }
 
       // Smooth eastern inland boundary taper (1.1km) to avoid vertical cliff edge
       const dEastKm = (126.493 - lng) * 91.2;
@@ -377,10 +619,10 @@
         h *= (0.5 - 0.5 * Math.cos(Math.PI * t));
       }
 
-      return Math.max(0, Math.min(820, h));
+      return Math.max(0, Math.min(840, h));
     }
 
-    // 1. Build 512x512 DEM heightCanvas (maxMeters = 850)
+    // 1. Build 512x512 16-bit RG DEM heightCanvas (maxMeters = 850, zero 8-bit contour terracing!)
     const heightCanvas = document.createElement('canvas');
     heightCanvas.width = HW;
     heightCanvas.height = HH;
@@ -399,10 +641,12 @@
         const e = inLand ? calculateElevation(lat, lng) : 0;
         elevGrid[rowOff + px] = e;
 
-        const val = Math.min(255, Math.floor((e / 850) * 255));
-        hData[idx] = val;
-        hData[idx + 1] = val;
-        hData[idx + 2] = val;
+        const scaled = Math.min(255, Math.max(0, (e / 850) * 255));
+        const rByte = Math.min(255, Math.floor(scaled));
+        const gByte = Math.min(255, Math.floor((scaled - rByte) * 255));
+        hData[idx] = rByte;
+        hData[idx + 1] = gByte;
+        hData[idx + 2] = rByte;
         hData[idx + 3] = inLand ? 255 : 0;
       }
     }
@@ -502,7 +746,7 @@
           nData[idx + 3] = 0;
           eData[idx + 3] = 0;
           nmData[idx + 3] = 0;
-          rgData[idx] = 52; rgData[idx + 1] = 52; rgData[idx + 2] = 52; rgData[idx + 3] = 255;
+          rgData[idx] = 48; rgData[idx + 1] = 48; rgData[idx + 2] = 48; rgData[idx + 3] = 255;
           continue;
         }
 
@@ -513,8 +757,12 @@
         const xNext = sampleElevation(px + 3, py);
         const yPrev = sampleElevation(px, py - 3);
         const yNext = sampleElevation(px, py + 3);
-        const microBumpX = (pseudoNoise(px + 1, py) - pseudoNoise(px - 1, py)) * 0.03;
-        const microBumpY = (pseudoNoise(px, py + 1) - pseudoNoise(px, py - 1)) * 0.03;
+        const tAlpha = trackPixels[idx + 3] / 255;
+
+        // Smoother micro-bump on engineered motorsport asphalt vs coarser natural terrain
+        const bumpScale = tAlpha > 0.5 ? 0.008 : 0.032;
+        const microBumpX = (pseudoNoise(px + 1, py) - pseudoNoise(px - 1, py)) * bumpScale;
+        const microBumpY = (pseudoNoise(px, py + 1) - pseudoNoise(px, py - 1)) * bumpScale;
 
         const dzdx = (xNext - xPrev) * 0.042 + microBumpX;
         const dzdy = (yNext - yPrev) * 0.042 + microBumpY;
@@ -536,100 +784,95 @@
         const grain = pseudoNoise(px, py);
 
         const dCircuitCenter = distKm(lat, lng, 34.7365, 126.4145);
-        const tAlpha = trackPixels[idx + 3] / 255;
 
         let r = 82, g = 132, b = 66;
         let roughVal = 215;
 
-        // 2. Circuit grounds & manicured infield turf (smoothly blended along irregular park perimeter)
-        const turfBlend = Math.max(0, Math.min(1, (1.38 + (medNoise - 0.5) * 0.35 - dCircuitCenter) / 0.32));
-        // 3. Base Jeollanam-do coastal plains, Samho pine hills & Wolchulsan granite ridges
+        const turfBlend = Math.max(0, Math.min(1, (1.42 + (medNoise - 0.5) * 0.32 - dCircuitCenter) / 0.30));
         const elevNorm = Math.min(1, elev / 760);
         const canopy = medNoise * 0.55 + microNoise * 0.45;
-        let fr = 72 + canopy * 34 - elevNorm * 18 + grain * 6;
-        let fg = 122 + canopy * 30 - elevNorm * 28 + grain * 6;
-        let fb = 60 + canopy * 18 - elevNorm * 10 + grain * 4;
+        let fr = 70 + canopy * 34 - elevNorm * 18 + grain * 6;
+        let fg = 120 + canopy * 30 - elevNorm * 28 + grain * 6;
+        let fb = 58 + canopy * 18 - elevNorm * 10 + grain * 4;
 
-        // Fine reclaimed agricultural paddy/field texture on low flat Samho plains (< 20m)
+        // Reclaimed Samho agricultural plain & golden-green coastal fields (< 20m outside circuit)
         if (elev < 20 && turfBlend < 0.99) {
-          const gx = px * 0.22;
-          const gy = py * 0.22;
+          const gx = px * 0.19;
+          const gy = py * 0.19;
           const subX = gx - Math.floor(gx);
           const subY = gy - Math.floor(gy);
           const cellHash = pseudoNoise(Math.floor(gx), Math.floor(gy));
           const plainMix = Math.max(0, Math.min(1, (20 - elev) / 8)) * (1 - turfBlend);
           let pr, pg, pb;
-          if (subX < 0.08 || subY < 0.08) {
-            pr = 126; pg = 136; pb = 112;
+          if (subX < 0.07 || subY < 0.07) {
+            pr = 132; pg = 138; pb = 118;
+          } else if (cellHash > 0.72) {
+            pr = 122 + microNoise * 14;
+            pg = 144 + microNoise * 14;
+            pb = 82 + microNoise * 8;
           } else {
-            pr = 92 + cellHash * 16 + microNoise * 12;
-            pg = 138 + cellHash * 14 + microNoise * 14;
-            pb = 74 + cellHash * 10 + microNoise * 8;
+            pr = 88 + cellHash * 18 + microNoise * 12;
+            pg = 136 + cellHash * 16 + microNoise * 14;
+            pb = 72 + cellHash * 10 + microNoise * 8;
           }
           fr = fr * (1 - plainMix) + pr * plainMix;
           fg = fg * (1 - plainMix) + pg * plainMix;
           fb = fb * (1 - plainMix) + pb * plainMix;
         }
 
-        // Exposed rocky Wolchulsan granite peaks on steep slopes & high elevations
-        const rockTrigger = slope * 0.72 + Math.max(0, elev - 240) / 310 + (microNoise - 0.5) * 0.26;
-        const rockMix = Math.max(0, Math.min(1, (rockTrigger - 0.48) * 2.5));
+        // Exposed pale Wolchulsan granite crags on steep slopes & upper ridges
+        const rockTrigger = slope * 0.74 + Math.max(0, elev - 230) / 300 + (microNoise - 0.5) * 0.26;
+        const rockMix = Math.max(0, Math.min(1, (rockTrigger - 0.47) * 2.55));
         if (rockMix > 0.01) {
-          const tone = 148 + elevNorm * 64 + microNoise * 24 + grain * 8;
-          fr = fr * (1 - rockMix) + Math.min(228, tone) * rockMix;
-          fg = fg * (1 - rockMix) + Math.min(226, tone - 3) * rockMix;
-          fb = fb * (1 - rockMix) + Math.min(230, tone + 2) * rockMix;
-          roughVal = Math.round(roughVal * (1 - rockMix) + 192 * rockMix);
+          const tone = 152 + elevNorm * 64 + microNoise * 24 + grain * 8;
+          fr = fr * (1 - rockMix) + Math.min(232, tone) * rockMix;
+          fg = fg * (1 - rockMix) + Math.min(229, tone - 3) * rockMix;
+          fb = fb * (1 - rockMix) + Math.min(234, tone + 3) * rockMix;
+          roughVal = Math.round(roughVal * (1 - rockMix) + 188 * rockMix);
         }
 
-        // Blend circuit manicured turf over base landscape
+        // Manicured diagonal mowed motorsport infield turf inside KIC grounds
         if (turfBlend > 0.01) {
-          const stripe = ((Math.floor(px / 20) + Math.floor(py / 20)) & 1) ? 1 : 0;
-          let tr = 76 + stripe * 5 + microNoise * 14;
-          let tg = 140 + stripe * 8 + microNoise * 16;
-          let tb = 68 + microNoise * 10;
-
-          // Paddock concrete plaza & spectator concourse behind main straight
-          const dPaddock = distKm(lat, lng, 34.7358, 126.4160);
-          if (dPaddock < 0.23) {
-            const pBlend = Math.min(1, (0.23 - dPaddock) / 0.05);
-            tr = tr * (1 - pBlend) + (182 + grain * 10) * pBlend;
-            tg = tg * (1 - pBlend) + (188 + grain * 10) * pBlend;
-            tb = tb * (1 - pBlend) + (194 + grain * 10) * pBlend;
-            roughVal = Math.round(roughVal * (1 - pBlend) + 152 * pBlend);
-          }
-
+          const diagStripe = ((Math.floor((px + py) / 16)) & 1) ? 1 : 0;
+          const tr = 74 + diagStripe * 8 + microNoise * 12;
+          const tg = 142 + diagStripe * 11 + microNoise * 14;
+          const tb = 66 + diagStripe * 4 + microNoise * 9;
           fr = fr * (1 - turfBlend) + tr * turfBlend;
           fg = fg * (1 - turfBlend) + tg * turfBlend;
           fb = fb * (1 - turfBlend) + tb * turfBlend;
+          roughVal = Math.round(roughVal * (1 - turfBlend) + 198 * turfBlend);
         }
 
-        // 1. Seawall concrete embankment & turquoise surf along Yeongsanho / Samho coast
+        // Engineered Seawall Concrete Revetment along Samho Bay & Yeongamho Marina
         if (cDist <= 10 && lng < 126.485) {
           if (cDist <= 3) {
-            r = Math.floor(176 + microNoise * 32);
-            g = Math.floor(216 + microNoise * 24);
-            b = Math.floor(228 + microNoise * 20);
-            roughVal = 78;
+            r = Math.floor(172 + microNoise * 28);
+            g = Math.floor(208 + microNoise * 22);
+            b = Math.floor(220 + microNoise * 18);
+            roughVal = 72;
           } else {
-            r = Math.floor(174 + grain * 14);
-            g = Math.floor(178 + grain * 14);
-            b = Math.floor(176 + grain * 12);
-            roughVal = 175;
+            r = Math.floor(178 + grain * 14);
+            g = Math.floor(182 + grain * 14);
+            b = Math.floor(184 + grain * 12);
+            roughVal = 168;
           }
         } else {
           r = fr; g = fg; b = fb;
         }
 
-        // Blend crisp F1 track / runoff / kerbs / kart track texture right onto the ground
+        // Composite FIA Grade-1 Track / Runoff / Gravel / Paddock Layer with Aggregate Grain
         if (tAlpha > 0.01) {
-          const tr = trackPixels[idx];
-          const tg = trackPixels[idx + 1];
-          const tb = trackPixels[idx + 2];
+          const asphaltSpeckle = (grain - 0.5) * 9;
+          const tr = Math.max(0, Math.min(255, trackPixels[idx] + asphaltSpeckle));
+          const tg = Math.max(0, Math.min(255, trackPixels[idx + 1] + asphaltSpeckle));
+          const tb = Math.max(0, Math.min(255, trackPixels[idx + 2] + asphaltSpeckle));
           r = r * (1 - tAlpha) + tr * tAlpha;
           g = g * (1 - tAlpha) + tg * tAlpha;
           b = b * (1 - tAlpha) + tb * tAlpha;
-          roughVal = Math.round(roughVal * (1 - tAlpha) + 128 * tAlpha);
+          // Rubbered dark asphalt has lower specular roughness (~108) than gravel traps (~210)
+          const isDarkTarmac = (tr < 65 && tg < 70 && tb < 80);
+          const targetRough = isDarkTarmac ? 106 : 162;
+          roughVal = Math.round(roughVal * (1 - tAlpha) + targetRough * tAlpha);
         }
 
         nData[idx] = Math.min(255, Math.floor(r * shade));
@@ -642,11 +885,11 @@
         rgData[idx + 2] = roughVal;
         rgData[idx + 3] = 255;
 
-        // 4. Elevation Relief Map (0m - 800m hypsometric tint + track footprint highlight)
+        // 4. Elevation Relief Map (0m - 800m hypsometric tint + crisp KIC track silhouette)
         const ratio = Math.min(1, elev / 760);
         let er, eg, eb;
-        if (tAlpha > 0.45) {
-          er = 48; eg = 58; eb = 72; // Track silhouette visible in elevation mode too!
+        if (tAlpha > 0.45 && trackPixels[idx] < 90 && trackPixels[idx + 1] < 95) {
+          er = 42; eg = 52; eb = 66;
         } else if (ratio < 0.12) {
           const s = ratio / 0.12;
           er = Math.floor(78 + s * 64);
@@ -697,6 +940,7 @@
   window.YEONGAM_OUTLINE = YEONGAM_OUTLINE;
   window.YEONGAM_ROADS = YEONGAM_ROADS;
   window.YEONGAM_CIRCUIT_TRACK = KIC_GP_LOOP;
+  window.YEONGAM_SHORT_CONNECTOR = KIC_SHORT_CONNECTOR;
   window.YEONGAM_PIT_LANE = KIC_PIT_LANE;
   window.YEONGAM_KART_TRACK = KIC_KART_TRACK;
   window.YEONGAM_PRESETS = YEONGAM_PRESETS;

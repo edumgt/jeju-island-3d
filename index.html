@@ -21,6 +21,7 @@
   <script defer src="/assets/incheon-data.js"></script>
   <script defer src="/assets/gangneung-data.js"></script>
   <script defer src="/assets/yeongam-data.js"></script>
+  <script defer src="/assets/danyang-data.js"></script>
   <script defer src="/assets/climate-data.js"></script>
   <script defer src="/assets/terrain-optimizer.js"></script>
   <script defer src="/assets/place-search-helpers.js"></script>
@@ -85,6 +86,10 @@
           <button type="button" class="rail-dest-btn" data-region="yeongam" title="전남 영암 (F1 스포츠카 서킷·영암호)">
             <span class="rail-icon">🏎️</span>
             <small>영암</small>
+          </button>
+          <button type="button" class="rail-dest-btn" data-region="danyang" title="충주·단양 (충주댐·단양팔경·청풍호)">
+            <span class="rail-icon">🏞️</span>
+            <small>단양</small>
           </button>
         </div>
 
@@ -169,7 +174,14 @@
               <span class="dest-tab-icon">🏎️</span>
               <div class="dest-tab-text">
                 <strong>전남 영암</strong>
-                <small>KIC 스포츠카 서킷·영암호·월출산</small>
+                <small>KIC 서킷·영암호</small>
+              </div>
+            </button>
+            <button type="button" class="dest-tab" id="tab-dest-danyang" data-region="danyang" role="tab" aria-selected="false" title="충주댐·충주호·단양팔경 3D 플래너">
+              <span class="dest-tab-icon">🏞️</span>
+              <div class="dest-tab-text">
+                <strong>충주·단양</strong>
+                <small>충주댐·단양팔경</small>
               </div>
             </button>
           </div>

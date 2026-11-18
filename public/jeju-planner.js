@@ -150,11 +150,11 @@
       brandMark: 'Y',
       brandColor: '#dc2626',
       storageKey: 'yeongam-studio-plan-v1',
-      sidebarEyebrow: 'MOTORSPORT & COASTAL RIDGE',
-      sidebarTitle: '영암 F1 스포츠카 서킷을<br>3D로 질주하세요.',
-      sidebarDesc: '5.615km 18개 코너의 코리아 인터내셔널 서킷과 영암호 요트 마리나, 은적산·월출산 능선을 배경으로 레이싱 코스를 입체 탐험해 보세요.',
-      viewerTitle: 'Yeongam KIC Circuit',
-      viewerSub: '전라남도 영암군 · 북위 34.74°',
+      sidebarEyebrow: 'HERMANN TILKE 5.615KM · FIA GRADE 1',
+      sidebarTitle: '영암 코리아 인터내셔널 서킷을<br>리얼 3D로 질주하세요.',
+      sidebarDesc: '5.615km 18개 코너의 F1·GT 그랑프리 트랙과 상징적인 한옥 기와육교, 1.2km 백스트레이트, 영암호 요트 마리나, 월출산 화강암 능선까지 정밀하게 구현했습니다.',
+      viewerTitle: 'Korea International Circuit · Yeongam',
+      viewerSub: '전라남도 영암군 삼호읍 · FIA Grade-1 5.615km',
       summaryTitle: '나만의 영암 서킷 지도',
       bounds: { west: 126.382, south: 34.712, east: 126.498, north: 34.782 },
       mapWidth: 108,
@@ -167,6 +167,33 @@
       defaultCamDistance: 124,
       customDefaults: { latMin: 34.712, latMax: 34.782, latPlaceholder: '34.7376', lngMin: 126.382, lngMax: 126.498, lngPlaceholder: '126.4152' },
       presets: window.YEONGAM_PRESETS || []
+    },
+    danyang: {
+      id: 'danyang',
+      name: '충주·단양',
+      subTitle: '충주댐·단양팔경',
+      brandTitle: 'DANYANG · CHUNGJU',
+      brandSub: '충주댐·충주호·단양팔경 3D 지도',
+      brandMark: 'D',
+      brandColor: '#0d8a72',
+      storageKey: 'danyang-studio-plan-v1',
+      sidebarEyebrow: 'CHUNGJUHO LAKE & DANYANG 8 VIEWS',
+      sidebarTitle: '충주댐과 충주호,<br>단양팔경을 입체 탐험하세요.',
+      sidebarDesc: '국내 최대 콘크리트 중력식 충주댐과 푸른 청풍호반, 도담삼봉·구담봉·옥순봉·사인암·선암계곡까지 남한강 협곡 명소를 3D로 조망해 보세요.',
+      viewerTitle: 'Chungjuho & Danyang 8 Views',
+      viewerSub: '충청북도 충주·단양 · 북위 36.96°',
+      summaryTitle: '나만의 충주·단양 지도',
+      bounds: { west: 127.940, south: 36.835, east: 128.500, north: 37.065 },
+      mapWidth: 112,
+      mapDepth: 62,
+      heightFactor: 0.0115,
+      droneAltitudeMeters: 110,
+      oceanBox: [116, 0.8, 66],
+      oceanRimBox: [118, 0.5, 68],
+      lightPos: [-34, 86, 46],
+      defaultCamDistance: 168,
+      customDefaults: { latMin: 36.835, latMax: 37.065, latPlaceholder: '36.9916', lngMin: 127.940, lngMax: 128.500, lngPlaceholder: '128.3432' },
+      presets: window.DANYANG_PRESETS || []
     }
   };
 
@@ -443,6 +470,8 @@
   let yeongamTrackCurve = null;
   let yeongamAnimCars = [];
   let yeongamEmissiveMaterials = [];
+  let danyangLandmarksGroup = null;
+  let danyangWaterAccentsGroup = null;
   let regionalEmissiveMaterials = [];
   let isSoftwareGl = false;
   let airportAnimPlane = null;
@@ -572,12 +601,14 @@
     if (currentRegionId === 'incheon') return window.INCHEON_OUTLINE;
     if (currentRegionId === 'gangneung') return window.GANGNEUNG_OUTLINE;
     if (currentRegionId === 'yeongam') return window.YEONGAM_OUTLINE;
+    if (currentRegionId === 'danyang') return window.DANYANG_OUTLINE;
     return [];
   }
 
   function getOceanSurfaceY() {
     if (currentRegionId === 'haeundae') return -0.40;
     if (currentRegionId === 'incheon') return -0.58;
+    if (currentRegionId === 'yeongam') return -0.34;
     return -1.50;
   }
 
@@ -607,6 +638,11 @@
         tags: { highway: road.type, name: road.name },
         geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
       })) : [];
+    } else if (currentRegionId === 'danyang') {
+      return Array.isArray(window.DANYANG_ROADS) ? window.DANYANG_ROADS.map((road) => ({
+        tags: { highway: road.type, name: road.name },
+        geometry: road.points.map(([lat, lon]) => ({ lat, lon }))
+      })) : [];
     }
     return [];
   }
@@ -625,6 +661,9 @@
     }
     if (currentRegionId === 'yeongam' && typeof window.inYeongamLand === 'function') {
       return window.inYeongamLand(lng, lat);
+    }
+    if (currentRegionId === 'danyang' && typeof window.inDanyangLand === 'function') {
+      return window.inDanyangLand(lng, lat);
     }
     const outline = getOutline();
     if (!outline || !outline.length) return true;
@@ -658,17 +697,25 @@
     const dx = x - x0, dy = y - y0;
     const index = (row, col) => (row * hd.width + col) * 4;
     const pixels = hd.pixels;
-    const h00 = pixels[index(y0, x0)];
-    const h10 = pixels[index(y0, x0 + 1)];
-    const h01 = pixels[index(y0 + 1, x0)];
-    const h11 = pixels[index(y0 + 1, x0 + 1)];
+    const samplePx = (currentRegionId === 'danyang' || currentRegionId === 'yeongam')
+      ? (row, col) => {
+          const idx = index(row, col);
+          return pixels[idx] + pixels[idx + 1] / 255;
+        }
+      : (row, col) => pixels[index(row, col)];
+    const h00 = samplePx(y0, x0);
+    const h10 = samplePx(y0, x0 + 1);
+    const h01 = samplePx(y0 + 1, x0);
+    const h11 = samplePx(y0 + 1, x0 + 1);
     const maxMeters = currentRegionId === 'jeju'
       ? 2000
       : (currentRegionId === 'haeundae'
         ? 650
         : (currentRegionId === 'gangneung'
           ? 1800
-          : (currentRegionId === 'yeongam' ? 850 : 300)));
+          : (currentRegionId === 'danyang'
+            ? 1500
+            : (currentRegionId === 'yeongam' ? 850 : 300))));
     return ((h00 * (1 - dx) + h10 * dx) * (1 - dy) +
       (h01 * (1 - dx) + h11 * dx) * dy) / 255 * maxMeters;
   }
@@ -1248,7 +1295,8 @@
         terrain.material.needsUpdate = true;
         renderedMapStyle = state.mapStyle;
       }
-      if (ocean) ocean.visible = state.showOcean;
+      if (ocean) ocean.visible = currentRegionId === 'danyang' ? false : state.showOcean;
+      if (danyangWaterAccentsGroup) danyangWaterAccentsGroup.visible = state.showOcean;
       if (roadGroup) roadGroup.visible = state.showRoads;
       const roadWays = getRoadWays();
       $('#road-legend').hidden = !state.showRoads || !roadWays.length;
@@ -1272,12 +1320,88 @@
     const { x, z } = worldPosition(marker.lat, marker.lng);
     const y = surfaceHeight(marker.lat, marker.lng);
     const isAirport = id === 'incheon-airport' || id === 'incheon-t2' || id === 'incheon-tower';
-    const dx = isAirport ? 6.2 : 14;
-    const dy = isAirport ? 5.6 : 13;
-    const dz = isAirport ? 8.4 : 17;
+    let dx = isAirport ? 6.2 : 14;
+    let dy = isAirport ? 5.6 : 13;
+    let dz = isAirport ? 8.4 : 17;
+
+    if (currentRegionId === 'danyang') {
+      if (id === 'chungju_dam') {
+        // Look up the WNW Namhangang tailrace straight at Chungju Dam's concrete spillway & lake behind it
+        dx = -7.2;
+        dy = 5.4;
+        dz = -3.4;
+      } else if (id === 'dodamsambong') {
+        // Look across the wide Namhangang S-bend basin directly toward the 3 karst peaks & Seokmun
+        dx = 5.4;
+        dy = 4.6;
+        dz = 3.8;
+      } else if (id === 'gudam_oksun') {
+        // Look along the Chungjuho narrows framing Oksun Bridge, Oksunbong spires, and Gudambong
+        dx = -5.2;
+        dy = 5.2;
+        dz = 4.6;
+      } else if (id === 'mancheonha') {
+        dx = 4.8;
+        dy = 4.8;
+        dz = -5.2;
+      } else {
+        dx = 8.5;
+        dy = 7.8;
+        dz = 9.5;
+      }
+    } else if (currentRegionId === 'yeongam') {
+      if (id === 'kic_grandstand') {
+        // Trackside stadium view looking NE along the Main Straight framing Control Tower, Start Gantry, Wave Grandstand, Pit Garages & Hanok Overpass
+        dx = -6.4;
+        dy = 4.1;
+        dz = 5.8;
+      } else if (id === 'kic_paddock') {
+        // Frame 24-bay Pit Building, Paddock Transporters, Race Control Tower & Main Grandstand across the straight
+        dx = 5.2;
+        dy = 3.8;
+        dz = 5.6;
+      } else if (id === 'kic_marina') {
+        // Position camera SW over Yeongamho Yacht Basin looking NE across superyachts directly into Marina Turns 12-14 & Stadium
+        dx = -7.2;
+        dy = 4.6;
+        dz = 7.6;
+      } else if (id === 'samho_marina') {
+        dx = -4.6;
+        dy = 3.6;
+        dz = 6.2;
+      } else if (id === 'kic_turn3') {
+        // Frame heavy-braking Turn 3 Hairpin, smooth FIA blue/red runoff, gravel trap & 1.2km Back Straight toward Wolchulsan
+        dx = -5.4;
+        dy = 3.9;
+        dz = 4.8;
+      } else if (id === 'kic_kart') {
+        dx = -4.2;
+        dy = 3.4;
+        dz = 4.8;
+      } else {
+        dx = 9.5;
+        dy = 8.2;
+        dz = 11.0;
+      }
+    }
+
+    // Ensure camera sightline never hides behind an intervening mountain ridge
+    const camX = x + dx;
+    const camZ = z + dz;
+    const camGroundY = surfaceHeightAtWorld(camX, camZ);
+    const midGroundY1 = surfaceHeightAtWorld(x + dx * 0.45, z + dz * 0.45);
+    const midGroundY2 = surfaceHeightAtWorld(x + dx * 0.75, z + dz * 0.75);
+    const minClearance = currentRegionId === 'yeongam' ? 2.1 : 2.8;
+    const safeCamY = Math.max(
+      y + dy,
+      camGroundY + minClearance + 0.4,
+      midGroundY1 + minClearance,
+      midGroundY2 + minClearance + 0.2
+    );
+
     cameraFlyTarget = {
-      target: new THREE.Vector3(x, y + (isAirport ? 0.45 : 0.8), z),
-      pos: new THREE.Vector3(x + dx, y + dy, z + dz)
+      target: new THREE.Vector3(x, y + (isAirport || currentRegionId === 'danyang' || currentRegionId === 'yeongam' ? 0.42 : 0.8), z),
+      pos: new THREE.Vector3(camX, safeCamY, camZ)
     };
   }
 
@@ -1529,9 +1653,13 @@
       controls.target.set(6, -11, 2);
       camera.position.set(distance * 0.44, distance * 0.34 - 16, distance * 0.62);
     } else if (currentRegionId === 'yeongam') {
-      // Frame Yeongam KIC F1 circuit, Grandstand & Marina waterfront in foreground with Eunjeoksan / Wolchulsan ridge behind
-      controls.target.set(-14, -7.5, 8);
-      camera.position.set(-44, 24, 56);
+      // Frame Yeongam KIC 5.615km circuit, Hanok bridges, Grandstand & Marina yacht harbor in foreground with Wolchulsan granite peaks behind
+      controls.target.set(-16.5, 0.35, 9.2);
+      camera.position.set(-45.5, 23.5, 44.5);
+    } else if (currentRegionId === 'danyang') {
+      // Frame Chungju Dam on the west, Chungjuho / Oksun Bridge in center, Dodamsambong & Sobaeksan rising on the east
+      controls.target.set(2, -5.5, -2);
+      camera.position.set(-14, 46, 78);
     } else {
       controls.target.set(0, -15, 0);
       camera.position.set(distance * 0.45, distance * 0.53 - 17, distance * 0.72);
@@ -1661,11 +1789,48 @@
     $('#sidebar-title').innerHTML = r.sidebarTitle;
     $('#sidebar-desc').textContent = r.sidebarDesc;
     const kicker = $('#sidebar-kicker');
-    if (kicker) kicker.textContent = r.id === 'jeju' ? 'EXPLORE JEJU' : (r.id === 'haeundae' ? 'EXPLORE HAEUNDAE' : (r.id === 'gangneung' ? 'EXPLORE GANGNEUNG' : (r.id === 'yeongam' ? 'EXPLORE YEONGAM' : 'EXPLORE INCHEON')));
+    if (kicker) {
+      const kickerMap = {
+        jeju: 'EXPLORE JEJU',
+        haeundae: 'EXPLORE HAEUNDAE',
+        incheon: 'EXPLORE INCHEON',
+        gangneung: 'EXPLORE GANGNEUNG',
+        yeongam: 'EXPLORE YEONGAM',
+        danyang: 'EXPLORE DANYANG & CHUNGJU'
+      };
+      kicker.textContent = kickerMap[r.id] || 'EXPLORE MAP';
+    }
     const styleLead = $('#panel-lead-style');
-    if (styleLead) styleLead.textContent = r.id === 'jeju' ? '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.' : (r.id === 'haeundae' ? '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.' : (r.id === 'gangneung' ? '경포호와 동해 해안, 멀리 설악산 대청봉 능선의 고도를 살펴보세요.' : (r.id === 'yeongam' ? '코리아 인터내셔널 서킷 평지와 은적산·월출산 산악 배경의 높낮이를 살펴보세요.' : '영종도 백운산과 송도, 인천대교의 높낮이를 살펴보세요.')));
+    if (styleLead) {
+      const styleMap = {
+        jeju: '한라산의 높낮이와 해안선을 원하는 방식으로 살펴보세요.',
+        haeundae: '장산과 동백섬, 해안선의 높낮이를 원하는 방식으로 살펴보세요.',
+        incheon: '영종도 백운산과 송도, 인천대교의 높낮이를 살펴보세요.',
+        gangneung: '경포호와 동해 해안, 멀리 설악산 대청봉 능선의 고도를 살펴보세요.',
+        yeongam: '코리아 인터내셔널 서킷 평지와 은적산·월출산 산악 배경의 높낮이를 살펴보세요.',
+        danyang: '충주댐 수위차와 청풍호·단양팔경 협곡, 소백산·월악산 능선 고도를 살펴보세요.'
+      };
+      styleLead.textContent = styleMap[r.id] || styleMap.jeju;
+    }
     const customName = $('#custom-name');
-    if (customName) customName.placeholder = r.id === 'jeju' ? '예: 나만의 제주 장소' : (r.id === 'haeundae' ? '예: 나만의 해운대 장소' : (r.id === 'gangneung' ? '예: 나만의 강릉·설악 장소' : (r.id === 'yeongam' ? '예: 나만의 영암 서킷 포인트' : '예: 나만의 인천 장소')));
+    if (customName) {
+      const placeholderMap = {
+        jeju: '예: 나만의 제주 장소',
+        haeundae: '예: 나만의 해운대 장소',
+        incheon: '예: 나만의 인천 장소',
+        gangneung: '예: 나만의 강릉·설악 장소',
+        yeongam: '예: 나만의 영암 서킷 포인트',
+        danyang: '예: 나만의 충주호·단양 전망 포인트'
+      };
+      customName.placeholder = placeholderMap[r.id] || '예: 나만의 장소';
+    }
+    const oceanToggleRow = $('#toggle-ocean')?.closest('.toggle-row');
+    if (oceanToggleRow) {
+      const titleEl = oceanToggleRow.querySelector('strong');
+      const subEl = oceanToggleRow.querySelector('small');
+      if (titleEl) titleEl.textContent = r.id === 'danyang' ? '충주호·남한강 수면 효과' : '바다 표시';
+      if (subEl) subEl.textContent = r.id === 'danyang' ? '여수로 물보라·유람선 물결 표시' : '섬 주변의 푸른 배경';
+    }
 
     // Viewer badges & aria-label
     if (viewer) viewer.setAttribute('aria-label', `${r.name} 3D 지도`);
@@ -2450,6 +2615,40 @@
         heightData,
         textures: { natural, elevation, normal, roughness }
       };
+    } else if (regionId === 'danyang') {
+      if (typeof window.createDanyangAssets !== 'function') {
+        throw new Error('충주댐·단양팔경 3D 에셋 생성기를 찾을 수 없습니다.');
+      }
+      const { heightCanvas, naturalCanvas, elevationCanvas, normalCanvas, roughnessCanvas } = window.createDanyangAssets();
+      const hCtx = heightCanvas.getContext('2d', { willReadFrequently: true });
+      const heightData = {
+        width: heightCanvas.width,
+        height: heightCanvas.height,
+        pixels: hCtx.getImageData(0, 0, heightCanvas.width, heightCanvas.height).data
+      };
+
+      const natural = new THREE.CanvasTexture(naturalCanvas);
+      natural.encoding = THREE.sRGBEncoding;
+      natural.anisotropy = maxAniso;
+
+      const elevation = new THREE.CanvasTexture(elevationCanvas);
+      elevation.encoding = THREE.sRGBEncoding;
+      elevation.anisotropy = maxAniso;
+
+      let normal, roughness;
+      if (normalCanvas) {
+        normal = new THREE.CanvasTexture(normalCanvas);
+        normal.anisotropy = maxAniso;
+      }
+      if (roughnessCanvas) {
+        roughness = new THREE.CanvasTexture(roughnessCanvas);
+        roughness.anisotropy = maxAniso;
+      }
+
+      regionCaches.danyang = {
+        heightData,
+        textures: { natural, elevation, normal, roughness }
+      };
     }
 
     return regionCaches[regionId];
@@ -2468,8 +2667,14 @@
   }
 
   function buildIslandBase() {
-    if (baseMesh) disposeObject(baseMesh);
-    if (shoreline) disposeObject(shoreline);
+    if (baseMesh) {
+      disposeObject(baseMesh);
+      baseMesh = null;
+    }
+    if (shoreline) {
+      disposeObject(shoreline);
+      shoreline = null;
+    }
 
     const outline = getOutline();
     if (!outline || !outline.length) return;
@@ -2484,25 +2689,42 @@
 
     const baseDepth = currentRegionId === 'haeundae'
       ? 0.52
-      : (currentRegionId === 'incheon' ? 0.72 : 1.45);
+      : (currentRegionId === 'yeongam'
+        ? 0.50
+        : (currentRegionId === 'danyang'
+          ? 0.68
+          : (currentRegionId === 'incheon' ? 0.72 : 1.45)));
     const geometry = new THREE.ExtrudeGeometry(shape, { depth: baseDepth, bevelEnabled: false, steps: 1 });
     geometry.rotateX(Math.PI / 2);
-    const sideColor = (currentRegionId === 'haeundae' || currentRegionId === 'incheon') ? 0x262d2c : 0x363a38;
-    const topColor = (currentRegionId === 'haeundae' || currentRegionId === 'incheon') ? 0x323b39 : 0x48504c;
+    const isCoastalUrban = currentRegionId === 'haeundae' || currentRegionId === 'incheon' || currentRegionId === 'yeongam';
+    const sideColor = currentRegionId === 'danyang'
+      ? 0x252e31
+      : (isCoastalUrban ? 0x262d2c : 0x363a38);
+    const topColor = currentRegionId === 'danyang'
+      ? 0x313c40
+      : (isCoastalUrban ? 0x323b39 : 0x48504c);
     baseMesh = new THREE.Mesh(geometry, [
-      new THREE.MeshStandardMaterial({ color: sideColor, roughness: 0.9, metalness: 0.05 }), // basalt rock cliff
+      new THREE.MeshStandardMaterial({ color: sideColor, roughness: 0.9, metalness: 0.05 }), // geological plinth cliff
       new THREE.MeshStandardMaterial({ color: topColor, roughness: 0.85, metalness: 0.05 })
     ]);
     baseMesh.castShadow = true;
     baseMesh.receiveShadow = true;
     scene.add(baseMesh);
 
+    if (currentRegionId === 'danyang') {
+      return; // Inland mountain-lake block has no outer sea surf line
+    }
+
     const shoreOutline = currentRegionId === 'gangneung'
       ? outline.slice(0, 21)
       : (currentRegionId === 'haeundae'
           ? outline.slice(0, 32)
-          : (currentRegionId === 'incheon' ? outline.slice(0, 15) : outline));
-    const isOpenCoast = currentRegionId === 'gangneung' || currentRegionId === 'haeundae' || currentRegionId === 'incheon';
+          : (currentRegionId === 'incheon'
+              ? outline.slice(0, 15)
+              : (currentRegionId === 'yeongam'
+                  ? outline.slice(13).concat(outline.slice(1, 10))
+                  : outline)));
+    const isOpenCoast = currentRegionId === 'gangneung' || currentRegionId === 'haeundae' || currentRegionId === 'incheon' || currentRegionId === 'yeongam';
     const points = shoreOutline.map(([lng, lat]) => {
       const { x, z } = worldPosition(lat, lng);
       return new THREE.Vector3(x, 0.09, z);
@@ -2613,6 +2835,7 @@
     }
     if (currentRegionId === 'gangneung') buildGangneungLandmarks();
     if (currentRegionId === 'yeongam') buildYeongamCircuit();
+    if (currentRegionId === 'danyang') buildDanyangLandmarks();
     if (state.elevationProfileOpen) updateElevationProfile();
     else restoreTerrainFromVerticalSlice();
   }
@@ -3216,7 +3439,7 @@
     );
     oceanRim.position.y = -0.85;
     ocean.add(oceanRim);
-    ocean.visible = state.showOcean;
+    ocean.visible = currentRegionId === 'danyang' ? false : state.showOcean;
 
     buildIslandBase();
     buildTerrain();
@@ -3228,6 +3451,7 @@
     buildIncheonLandmarks();
     buildGangneungLandmarks();
     buildYeongamCircuit();
+    buildDanyangLandmarks();
     syncMarkers();
     resetWeatherBounds();
     if (state.elevationProfileOpen) updateElevationProfile();
@@ -4150,259 +4374,806 @@
       return;
     }
 
-    // 1. Closed 3D Catmull-Rom racing line
+    // 1. Closed 3D Catmull-Rom racing line grounded seamlessly over 16-bit DEM
     const curvePts = openRaw.map(([lat, lng]) => {
       const { x, z } = worldPosition(lat, lng);
-      return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.09, z);
+      return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.068, z);
     });
     yeongamTrackCurve = new THREE.CatmullRomCurve3(curvePts, true, 'catmullrom', 0.35);
 
+    const sampleCount = 240;
     const sampled = [];
-    const sampleCount = 190;
+    const tangents = [];
     for (let i = 0; i <= sampleCount; i++) {
-      sampled.push(yeongamTrackCurve.getPointAt(i / sampleCount));
+      const u = i / sampleCount;
+      sampled.push(yeongamTrackCurve.getPointAt(u));
+      tangents.push(yeongamTrackCurve.getTangentAt(u).normalize());
     }
 
-    // Main asphalt racing tarmac ribbon + FIA outer curb trim
-    const curbBorderMesh = createRoadRibbon(sampled, 0.44, 0xdc2626, 0.01);
-    if (curbBorderMesh) yeongamCircuitGroup.add(curbBorderMesh);
-    const trackAsphaltMesh = createRoadRibbon(sampled, 0.33, 0x262b33, 0.024);
+    // Precompute curvature & realistic cornering speed profile (fast on 1.2km & Main Straights, braking into hairpins)
+    const curvatures = new Float32Array(sampleCount);
+    const speedProfile = new Float32Array(sampleCount);
+    for (let i = 0; i < sampleCount; i++) {
+      const tPrev = tangents[(i - 3 + sampleCount) % sampleCount];
+      const tNext = tangents[(i + 3) % sampleCount];
+      // 2D XZ cross product: positive = turning left/right depending on handedness
+      const crossY = tPrev.x * tNext.z - tPrev.z * tNext.x;
+      curvatures[i] = crossY;
+    }
+    for (let i = 0; i < sampleCount; i++) {
+      // Look ahead 5 samples so cars brake BEFORE the apex and accelerate out
+      const kCurr = Math.abs(curvatures[i]);
+      const kAhead = Math.abs(curvatures[(i + 5) % sampleCount]);
+      const cornerLoad = Math.max(kCurr, kAhead * 0.92);
+      speedProfile[i] = Math.max(0.56, Math.min(1.28, 1.28 - cornerLoad * 1.45));
+    }
+
+    // Track Surface Ribbons: Grey safety verge + FIA Grade-1 dark basalt tarmac (NO toy-like full-loop red border!)
+    const vergeMesh = createRoadRibbon(sampled, 0.42, 0x525d6b, 0.006);
+    if (vergeMesh) yeongamCircuitGroup.add(vergeMesh);
+    const trackAsphaltMesh = createRoadRibbon(sampled, 0.33, 0x22272f, 0.018);
     if (trackAsphaltMesh) yeongamCircuitGroup.add(trackAsphaltMesh);
 
-    // Pit lane ribbon & Karting circuit ribbon
+    // Crisp White Left & Right Track-Limit Edge Stripes
+    const edgeLineMat = new THREE.LineBasicMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.88 });
+    [-0.285, 0.285].forEach((latOffset) => {
+      const edgePts = [];
+      for (let i = 0; i < sampleCount; i++) {
+        const p = sampled[i];
+        const t = tangents[i];
+        const nx = -t.z;
+        const nz = t.x;
+        edgePts.push(new THREE.Vector3(p.x + nx * latOffset, p.y + 0.026, p.z + nz * latOffset));
+      }
+      yeongamCircuitGroup.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(edgePts), edgeLineMat));
+    });
+
+    // Permanent 3.045 km Short-Circuit Connector, Pit Lane & CIK-FIA Karting Loop
+    if (Array.isArray(window.YEONGAM_SHORT_CONNECTOR) && window.YEONGAM_SHORT_CONNECTOR.length > 1) {
+      const shortPts = window.YEONGAM_SHORT_CONNECTOR.map(([lat, lng]) => {
+        const { x, z } = worldPosition(lat, lng);
+        return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.068, z);
+      });
+      const shortVerge = createRoadRibbon(shortPts, 0.25, 0x64748b, 0.005);
+      const shortTarmac = createRoadRibbon(shortPts, 0.19, 0x272d36, 0.015);
+      if (shortVerge) yeongamCircuitGroup.add(shortVerge);
+      if (shortTarmac) yeongamCircuitGroup.add(shortTarmac);
+    }
     if (Array.isArray(window.YEONGAM_PIT_LANE) && window.YEONGAM_PIT_LANE.length > 1) {
       const pitPts = window.YEONGAM_PIT_LANE.map(([lat, lng]) => {
         const { x, z } = worldPosition(lat, lng);
-        return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.09, z);
+        return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.068, z);
       });
-      const pitMesh = createRoadRibbon(pitPts, 0.20, 0x3b424d, 0.02);
+      const pitFastBlue = createRoadRibbon(pitPts, 0.22, 0x1d4ed8, 0.008);
+      const pitMesh = createRoadRibbon(pitPts, 0.16, 0x363e4a, 0.016);
+      if (pitFastBlue) yeongamCircuitGroup.add(pitFastBlue);
       if (pitMesh) yeongamCircuitGroup.add(pitMesh);
     }
     if (Array.isArray(window.YEONGAM_KART_TRACK) && window.YEONGAM_KART_TRACK.length > 2) {
-      const kartPts = window.YEONGAM_KART_TRACK.map(([lat, lng]) => {
+      const kartRaw = window.YEONGAM_KART_TRACK.slice(0, -1).map(([lat, lng]) => {
         const { x, z } = worldPosition(lat, lng);
-        return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.09, z);
+        return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.068, z);
       });
-      const kartMesh = createRoadRibbon(kartPts, 0.16, 0x334155, 0.02);
+      const kartCurve = new THREE.CatmullRomCurve3(kartRaw, true, 'catmullrom', 0.35);
+      const kartSampled = [];
+      for (let i = 0; i <= 72; i++) kartSampled.push(kartCurve.getPointAt(i / 72));
+      const kartShoulders = createRoadRibbon(kartSampled, 0.17, 0x2563eb, 0.008);
+      const kartMesh = createRoadRibbon(kartSampled, 0.12, 0x2d3540, 0.016);
+      if (kartShoulders) yeongamCircuitGroup.add(kartShoulders);
       if (kartMesh) yeongamCircuitGroup.add(kartMesh);
     }
 
-    // Shared architectural materials
-    const concreteMat = new THREE.MeshStandardMaterial({ color: 0xe6eaef, roughness: 0.78, metalness: 0.08 });
-    const steelMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.45, metalness: 0.55 });
-    const roofCanopyMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35, metalness: 0.22 });
-    const redAccentMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.42, metalness: 0.15 });
+    // Shared PBR architectural & motorsport materials (calibrated platinum-slate contrast to prevent midday glare)
+    const concreteMat = new THREE.MeshStandardMaterial({ color: 0xdfe6ee, roughness: 0.76, metalness: 0.08 });
+    const darkConcreteMat = new THREE.MeshStandardMaterial({ color: 0x8b9bb0, roughness: 0.80, metalness: 0.10 });
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.42, metalness: 0.58 });
+    const silverArmcoMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.36, metalness: 0.68 });
+    const roofCanopyMat = new THREE.MeshStandardMaterial({ color: 0xe6edf5, roughness: 0.44, metalness: 0.16 });
+    const redAccentMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.42, metalness: 0.16 });
+    const cobaltMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.44, metalness: 0.18 });
+    const dancheongColMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.52, metalness: 0.12 });
+    const dancheongBeamMat = new THREE.MeshStandardMaterial({ color: 0x1e5641, roughness: 0.56, metalness: 0.10 });
+    const giwaMat = new THREE.MeshStandardMaterial({ color: 0x222934, roughness: 0.55, metalness: 0.24 });
+    const garageDoorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.50, metalness: 0.42 });
     const glassMat = new THREE.MeshStandardMaterial({
       color: 0x60a5fa,
       emissive: 0x1d4ed8,
-      emissiveIntensity: 0.18,
-      roughness: 0.18,
-      metalness: 0.45
+      emissiveIntensity: 0.20,
+      roughness: 0.16,
+      metalness: 0.50
     });
-    yeongamEmissiveMaterials.push({ mat: glassMat, dayInt: 0.18, nightInt: 0.95 });
+    yeongamEmissiveMaterials.push({ mat: glassMat, dayInt: 0.20, nightInt: 1.05 });
 
-    // Compute exact Main Straight heading angle from grid -> T1 braking zone
-    const stA = worldPosition(34.7366, 126.4122);
-    const stB = worldPosition(34.7386, 126.4186);
+    // 2. Corner-Localized 3D FIA Red/White Serrated Kerbs & Outer TecPro/Armco Safety Barriers (InstancedMesh)
+    const kerbTransforms = [];
+    const barrierTransforms = [];
+    const _dummy = new THREE.Object3D();
+    for (let i = 0; i < sampleCount; i++) {
+      const k = curvatures[i];
+      const absK = Math.abs(k);
+      const prevK = Math.abs(curvatures[(i - 4 + sampleCount) % sampleCount]);
+      if (absK < 0.085 && prevK < 0.12) continue;
+
+      const p = sampled[i];
+      const t = tangents[i];
+      const heading = Math.atan2(t.x, t.z);
+      const nx = -t.z;
+      const nz = t.x;
+      // Inside apex side & outside exit side
+      const insideSign = k >= 0 ? -1 : 1;
+      kerbTransforms.push({
+        x: p.x + nx * insideSign * 0.31,
+        y: p.y + 0.022,
+        z: p.z + nz * insideSign * 0.31,
+        rotY: heading,
+        isWhite: (i & 1) === 0
+      });
+      if (absK > 0.11 || prevK > 0.11) {
+        kerbTransforms.push({
+          x: p.x - nx * insideSign * 0.33,
+          y: p.y + 0.022,
+          z: p.z - nz * insideSign * 0.33,
+          rotY: heading,
+          isWhite: ((i + 1) & 1) === 0
+        });
+      }
+      // Outer FIA TecPro / Tire Barrier + Armco Guardrail along outer corner perimeter
+      if (absK > 0.095 && (i % 2 === 0)) {
+        const outDist = absK > 0.22 ? 0.68 : 0.56;
+        barrierTransforms.push({
+          x: p.x - nx * insideSign * outDist,
+          y: p.y + 0.055,
+          z: p.z - nz * insideSign * outDist,
+          rotY: heading,
+          isBlue: (i % 6) < 4
+        });
+      }
+    }
+
+    if (kerbTransforms.length > 0) {
+      const kerbGeo = new THREE.BoxGeometry(0.085, 0.026, 0.18);
+      const kerbBaseMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.06 });
+      const kerbInst = new THREE.InstancedMesh(kerbGeo, kerbBaseMat, kerbTransforms.length);
+      const cWhite = new THREE.Color(0xf8fafc);
+      const cRed = new THREE.Color(0xdc2626);
+      kerbTransforms.forEach((kt, idx) => {
+        _dummy.position.set(kt.x, kt.y, kt.z);
+        _dummy.rotation.set(0, kt.rotY, 0);
+        _dummy.scale.set(1, 1, 1);
+        _dummy.updateMatrix();
+        kerbInst.setMatrixAt(idx, _dummy.matrix);
+        kerbInst.setColorAt(idx, kt.isWhite ? cWhite : cRed);
+      });
+      kerbInst.instanceMatrix.needsUpdate = true;
+      if (kerbInst.instanceColor) kerbInst.instanceColor.needsUpdate = true;
+      yeongamCircuitGroup.add(kerbInst);
+    }
+
+    if (barrierTransforms.length > 0) {
+      const tecproGeo = new THREE.BoxGeometry(0.09, 0.11, 0.36);
+      const tecproMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.62, metalness: 0.15 });
+      const tecproInst = new THREE.InstancedMesh(tecproGeo, tecproMat, barrierTransforms.length);
+      const armcoGeo = new THREE.BoxGeometry(0.04, 0.09, 0.38);
+      const armcoInst = new THREE.InstancedMesh(armcoGeo, silverArmcoMat, barrierTransforms.length);
+      const cBlue = new THREE.Color(0x1d4ed8);
+      const cCrimson = new THREE.Color(0xdc2626);
+
+      barrierTransforms.forEach((bt, idx) => {
+        _dummy.position.set(bt.x, bt.y, bt.z);
+        _dummy.rotation.set(0, bt.rotY, 0);
+        _dummy.scale.set(1, 1, 1);
+        _dummy.updateMatrix();
+        tecproInst.setMatrixAt(idx, _dummy.matrix);
+        tecproInst.setColorAt(idx, bt.isBlue ? cBlue : cCrimson);
+
+        _dummy.position.set(bt.x, bt.y + 0.05, bt.z);
+        _dummy.updateMatrix();
+        armcoInst.setMatrixAt(idx, _dummy.matrix);
+      });
+      tecproInst.instanceMatrix.needsUpdate = true;
+      if (tecproInst.instanceColor) tecproInst.instanceColor.needsUpdate = true;
+      armcoInst.instanceMatrix.needsUpdate = true;
+      yeongamCircuitGroup.add(tecproInst, armcoInst);
+    }
+
+    // 150m / 100m / 50m FIA Braking Distance Marker Boards before Turn 1 & Turn 3
+    const brakeBoardMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5, metalness: 0.2 });
+    [
+      // Approaching Turn 1 (outside of Main Straight)
+      [34.7382, 126.4170, -0.36],
+      [34.7386, 126.4181, -0.36],
+      [34.7390, 126.4192, -0.36],
+      // Approaching Turn 3 (outside of 1.2km Back Straight)
+      [34.7425, 126.4080, 2.95],
+      [34.7427, 126.4068, 2.95],
+      [34.7429, 126.4056, 2.95]
+    ].forEach(([bLat, bLng, rotY]) => {
+      const bp = worldPosition(bLat, bLng);
+      const by = surfaceHeight(bLat, bLng) + 0.12;
+      const board = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.03), brakeBoardMat);
+      board.position.set(bp.x, by, bp.z);
+      board.rotation.y = rotY;
+      yeongamCircuitGroup.add(board);
+    });
+
+    // Compute exact Main Straight heading angle from Start Grid -> T1 Braking Zone
+    const stA = worldPosition(34.7358, 126.4114);
+    const stB = worldPosition(34.7385, 126.4188);
     const straightAngle = Math.atan2(stB.z - stA.z, stB.x - stA.x);
 
-    // 2. KIC Main Grandstand (tiered stadium seating + sweeping cantilevered canopy)
-    const gsPos = worldPosition(34.7386, 126.4146);
-    const gsY = surfaceHeight(34.7386, 126.4146) + 0.05;
+    // 3. Helper: KIC Signature Korean Hanok Giwa Pedestrian Overpass Bridge (한옥 기와육교)
+    function createHanokOverpassBridge(lat, lng, roadAngleRad, spanZ) {
+      const bPos = worldPosition(lat, lng);
+      const bY = surfaceHeight(lat, lng) + 0.05;
+      const bridge = new THREE.Group();
+      bridge.position.set(bPos.x, bY, bPos.z);
+      bridge.rotation.y = -roadAngleRad;
+
+      const halfSpan = spanZ * 0.5;
+      [-halfSpan, halfSpan].forEach((pz) => {
+        const pier = new THREE.Mesh(new THREE.BoxGeometry(0.46, 1.08, 0.34), concreteMat);
+        pier.position.set(0, 0.54, pz);
+        pier.castShadow = true;
+        pier.receiveShadow = true;
+        bridge.add(pier);
+
+        const stairTower = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.92, 0.28), darkConcreteMat);
+        stairTower.position.set(-0.28, 0.46, pz + (pz > 0 ? 0.24 : -0.24));
+        stairTower.castShadow = true;
+        bridge.add(stairTower);
+      });
+
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.16, spanZ + 0.36), roofCanopyMat);
+      deck.position.set(0, 1.04, 0);
+      deck.castShadow = true;
+      bridge.add(deck);
+
+      [-0.29, 0.29].forEach((fx) => {
+        const fascia = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.11, spanZ + 0.12), fx < 0 ? redAccentMat : cobaltMat);
+        fascia.position.set(fx, 1.05, 0);
+        bridge.add(fascia);
+      });
+
+      const pavSpan = spanZ * 0.70;
+      const colGeo = new THREE.CylinderGeometry(0.036, 0.042, 0.46, 8);
+      for (let ci = -2; ci <= 2; ci++) {
+        const cz = (ci / 2) * (pavSpan * 0.44);
+        [-0.20, 0.20].forEach((cx) => {
+          const col = new THREE.Mesh(colGeo, dancheongColMat);
+          col.position.set(cx, 1.34, cz);
+          bridge.add(col);
+        });
+      }
+
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.08, pavSpan * 0.94), dancheongBeamMat);
+      lintel.position.set(0, 1.58, 0);
+      bridge.add(lintel);
+
+      const lowerEave = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.07, pavSpan * 1.12), giwaMat);
+      lowerEave.position.set(0, 1.66, 0);
+      lowerEave.castShadow = true;
+      bridge.add(lowerEave);
+
+      [-1, 1].forEach((endSign) => {
+        const wingTip = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.055, 0.26), giwaMat);
+        wingTip.position.set(0, 1.70, endSign * (pavSpan * 0.56));
+        wingTip.rotation.x = -endSign * 0.19;
+        bridge.add(wingTip);
+      });
+
+      [-1, 1].forEach((slopeSign) => {
+        const slope = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, pavSpan * 0.96), giwaMat);
+        slope.position.set(slopeSign * 0.19, 1.79, 0);
+        slope.rotation.z = -slopeSign * 0.44;
+        slope.castShadow = true;
+        bridge.add(slope);
+      });
+      const yongmaru = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.09, pavSpan * 0.92), giwaMat);
+      yongmaru.position.set(0, 1.90, 0);
+      bridge.add(yongmaru);
+
+      return bridge;
+    }
+
+    // #1 Main Straight Hanok Bridge (spanning both Main Straight & Pit-Out cleanly)
+    yeongamCircuitGroup.add(createHanokOverpassBridge(34.7379, 126.4176, straightAngle, 2.38));
+    // #2 1.2km Back-Straight Hanok Bridge
+    const infA = worldPosition(34.7405, 126.4195);
+    const infB = worldPosition(34.7422, 126.4094);
+    const backStraightAngle = Math.atan2(infB.z - infA.z, infB.x - infA.x);
+    yeongamCircuitGroup.add(createHanokOverpassBridge(34.7414, 126.4146, backStraightAngle, 1.88));
+
+    // 4. KIC Main Grandstand (16,000-Seat Stadium Bowl + VIP Skyboxes + Wave Cantilevered Canopy)
+    const gsPos = worldPosition(34.7383, 126.4145);
+    const gsY = surfaceHeight(34.7383, 126.4145) + 0.05;
     const grandstand = new THREE.Group();
     grandstand.position.set(gsPos.x, gsY, gsPos.z);
     grandstand.rotation.y = -straightAngle;
 
-    [0.25, 0.52, 0.80].forEach((tierH, idx) => {
-      const tier = new THREE.Mesh(new THREE.BoxGeometry(5.6 - idx * 0.25, tierH, 1.35 - idx * 0.30), concreteMat);
-      tier.position.set(0, tierH * 0.5, -0.35 - idx * 0.25);
-      tier.castShadow = true;
-      tier.receiveShadow = true;
-      grandstand.add(tier);
-    });
-    // Sweeping aerodynamic cantilevered canopy
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.14, 1.72), roofCanopyMat);
-    canopy.position.set(0, 1.62, -0.32);
-    canopy.rotation.x = 0.18;
-    canopy.castShadow = true;
-    grandstand.add(canopy);
-    const canopyTrim = new THREE.Mesh(new THREE.BoxGeometry(5.82, 0.07, 0.14), redAccentMat);
-    canopyTrim.position.set(0, 1.46, 0.52);
-    grandstand.add(canopyTrim);
+    const gsPlinth = new THREE.Mesh(new THREE.BoxGeometry(6.1, 0.24, 1.50), concreteMat);
+    gsPlinth.position.set(0, 0.12, -0.48);
+    gsPlinth.castShadow = true;
+    gsPlinth.receiveShadow = true;
+    grandstand.add(gsPlinth);
 
-    [-2.3, -0.8, 0.8, 2.3].forEach((px) => {
-      const rib = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.55, 0.18), steelMat);
-      rib.position.set(px, 0.82, -0.88);
-      grandstand.add(rib);
+    const seatMats = [cobaltMat, roofCanopyMat, redAccentMat];
+    [
+      { h: 0.28, y: 0.30, z: 0.02, d: 0.42, w: 5.95 },
+      { h: 0.32, y: 0.56, z: -0.34, d: 0.42, w: 5.80 },
+      { h: 0.36, y: 0.86, z: -0.70, d: 0.42, w: 5.65 }
+    ].forEach((tCfg, idx) => {
+      const bowl = new THREE.Mesh(new THREE.BoxGeometry(tCfg.w, tCfg.h, tCfg.d), concreteMat);
+      bowl.position.set(0, tCfg.y, tCfg.z);
+      bowl.castShadow = true;
+      bowl.receiveShadow = true;
+      grandstand.add(bowl);
+
+      const seatBand = new THREE.Mesh(new THREE.BoxGeometry(tCfg.w - 0.12, 0.055, tCfg.d * 0.78), seatMats[idx]);
+      seatBand.position.set(0, tCfg.y + tCfg.h * 0.5 + 0.02, tCfg.z + 0.04);
+      grandstand.add(seatBand);
     });
+
+    const vipBox = new THREE.Mesh(new THREE.BoxGeometry(5.45, 0.28, 0.52), glassMat);
+    vipBox.position.set(0, 1.22, -0.78);
+    grandstand.add(vipBox);
+
+    const bayCount = 7;
+    const bayW = 6.16 / bayCount;
+    for (let b = 0; b < bayCount; b++) {
+      const bx = (b - (bayCount - 1) * 0.5) * bayW;
+      const waveLift = Math.cos(((b / (bayCount - 1)) - 0.5) * Math.PI * 1.6) * 0.17;
+      const roofPanel = new THREE.Mesh(new THREE.BoxGeometry(bayW - 0.04, 0.08, 1.88), roofCanopyMat);
+      roofPanel.position.set(bx, 1.56 + waveLift, -0.28);
+      roofPanel.rotation.x = 0.15;
+      roofPanel.castShadow = true;
+      grandstand.add(roofPanel);
+
+      // Dark structural steel spine beam atop each canopy bay for crisp daylight definition
+      const roofSpine = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.10, 1.90), steelMat);
+      roofSpine.position.set(bx, 1.58 + waveLift, -0.28);
+      roofSpine.rotation.x = 0.15;
+      grandstand.add(roofSpine);
+
+      const frontTrim = new THREE.Mesh(new THREE.BoxGeometry(bayW - 0.02, 0.055, 0.11), redAccentMat);
+      frontTrim.position.set(bx, 1.42 + waveLift, 0.63);
+      grandstand.add(frontTrim);
+
+      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.11, 1.72 + waveLift, 0.14), steelMat);
+      mast.position.set(bx, (1.72 + waveLift) * 0.5, -1.16);
+      mast.castShadow = true;
+      grandstand.add(mast);
+
+      const tieStrut = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 1.12), silverArmcoMat);
+      tieStrut.position.set(bx, 1.66 + waveLift, -0.64);
+      tieStrut.rotation.x = 0.18;
+      grandstand.add(tieStrut);
+    }
     yeongamCircuitGroup.add(grandstand);
 
-    // 3. Pit Building & Team Garages opposite Grandstand
-    const pitPos = worldPosition(34.7357, 126.4162);
-    const pitY = surfaceHeight(34.7357, 126.4162) + 0.05;
+    // 5. 24-Bay Pit Building, Paddock Club Terrace, Pit-Wall Pratfalls & Team Transporter Trucks
+    const pitPos = worldPosition(34.7357, 126.4163);
+    const pitY = surfaceHeight(34.7357, 126.4163) + 0.05;
     const pitBuilding = new THREE.Group();
     pitBuilding.position.set(pitPos.x, pitY, pitPos.z);
     pitBuilding.rotation.y = -straightAngle;
 
-    const pitCore = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.70, 1.05), concreteMat);
-    pitCore.position.y = 0.35;
+    const pitCore = new THREE.Mesh(new THREE.BoxGeometry(4.9, 0.44, 0.98), concreteMat);
+    pitCore.position.y = 0.22;
     pitCore.castShadow = true;
+    pitCore.receiveShadow = true;
     pitBuilding.add(pitCore);
 
-    const pitUpperGlass = new THREE.Mesh(new THREE.BoxGeometry(4.35, 0.30, 1.08), glassMat);
-    pitUpperGlass.position.y = 0.60;
+    const doorGeo = new THREE.BoxGeometry(0.20, 0.28, 0.05);
+    for (let g = 0; g < 18; g++) {
+      const gx = (g - 8.5) * 0.26;
+      const door = new THREE.Mesh(doorGeo, garageDoorMat);
+      door.position.set(gx, 0.16, -0.48);
+      pitBuilding.add(door);
+    }
+    const garageHeader = new THREE.Mesh(new THREE.BoxGeometry(4.88, 0.06, 0.08), redAccentMat);
+    garageHeader.position.set(0, 0.36, -0.49);
+    pitBuilding.add(garageHeader);
+
+    const pitUpperGlass = new THREE.Mesh(new THREE.BoxGeometry(4.78, 0.34, 1.04), glassMat);
+    pitUpperGlass.position.y = 0.61;
     pitBuilding.add(pitUpperGlass);
 
-    const pitOverhang = new THREE.Mesh(new THREE.BoxGeometry(4.7, 0.09, 1.30), steelMat);
-    pitOverhang.position.y = 0.84;
+    const pitOverhang = new THREE.Mesh(new THREE.BoxGeometry(5.04, 0.08, 1.26), roofCanopyMat);
+    pitOverhang.position.y = 0.83;
     pitOverhang.castShadow = true;
     pitBuilding.add(pitOverhang);
 
+    // Rooftop solar / mechanical louver bays on Pit Building roof
+    for (let lv = -2; lv <= 2; lv++) {
+      const louver = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.045, 0.56), darkConcreteMat);
+      louver.position.set(lv * 0.92, 0.89, 0.08);
+      pitBuilding.add(louver);
+    }
+
+    const pitWall = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.16, 0.07), concreteMat);
+    pitWall.position.set(-0.08, 0.08, -1.08);
+    pitBuilding.add(pitWall);
+
+    const timingBoxGeo = new THREE.BoxGeometry(0.38, 0.20, 0.13);
+    for (let tw = -2; tw <= 3; tw++) {
+      const tStand = new THREE.Mesh(timingBoxGeo, cobaltMat);
+      tStand.position.set(tw * 0.78 - 0.28, 0.24, -1.08);
+      pitBuilding.add(tStand);
+    }
+
+    const trailerColors = [redAccentMat, cobaltMat, roofCanopyMat, steelMat, redAccentMat, roofCanopyMat, cobaltMat, roofCanopyMat];
+    const trailerGeo = new THREE.BoxGeometry(0.22, 0.22, 0.72);
+    const cabGeo = new THREE.BoxGeometry(0.20, 0.18, 0.18);
+    for (let tr = 0; tr < 8; tr++) {
+      const tx = (tr - 3.5) * 0.58;
+      const trailer = new THREE.Mesh(trailerGeo, trailerColors[tr]);
+      trailer.position.set(tx, 0.13, 1.08);
+      trailer.castShadow = true;
+      pitBuilding.add(trailer);
+
+      const cab = new THREE.Mesh(cabGeo, steelMat);
+      cab.position.set(tx, 0.11, 1.56);
+      pitBuilding.add(cab);
+    }
+
     yeongamCircuitGroup.add(pitBuilding);
 
-    // 4. Start/Finish Timing Gantry with F1 glowing lights
-    const gantryPos = worldPosition(34.7370, 126.4136);
-    const gantryY = surfaceHeight(34.7370, 126.4136) + 0.05;
+    // 6. Start/Finish FIA Timing Gantry with 5 Red Start Light Pods & Checkered Banner
+    const gantryPos = worldPosition(34.7370, 126.4147);
+    const gantryY = surfaceHeight(34.7370, 126.4147) + 0.05;
     const gantry = new THREE.Group();
     gantry.position.set(gantryPos.x, gantryY, gantryPos.z);
     gantry.rotation.y = -straightAngle;
 
-    [-0.95, 0.95].forEach((sideZ) => {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.28, 0.12), steelMat);
-      post.position.set(0, 0.64, sideZ);
+    [-0.90, 0.90].forEach((sideZ) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.11, 1.18, 0.11), steelMat);
+      post.position.set(0, 0.59, sideZ);
       post.castShadow = true;
       gantry.add(post);
     });
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 2.08), steelMat);
-    beam.position.set(0, 1.24, 0);
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 1.98), steelMat);
+    beam.position.set(0, 1.14, 0);
     beam.castShadow = true;
     gantry.add(beam);
+
+    const bannerTop = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.08, 1.68), roofCanopyMat);
+    bannerTop.position.set(0, 1.28, 0);
+    gantry.add(bannerTop);
+
+    const sfStripe = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.14, 0.64),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: -4 })
+    );
+    sfStripe.rotation.x = -Math.PI / 2;
+    sfStripe.position.set(0, 0.045, 0);
+    gantry.add(sfStripe);
 
     const raceLightMat = new THREE.MeshStandardMaterial({
       color: 0xff2b2b,
       emissive: 0xef4444,
-      emissiveIntensity: 0.95,
+      emissiveIntensity: 1.05,
       roughness: 0.2
     });
-    yeongamEmissiveMaterials.push({ mat: raceLightMat, dayInt: 0.95, nightInt: 2.2 });
-    [-0.45, -0.22, 0, 0.22, 0.45].forEach((lz) => {
-      const pod = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), raceLightMat);
-      pod.position.set(-0.14, 1.24, lz);
+    yeongamEmissiveMaterials.push({ mat: raceLightMat, dayInt: 1.05, nightInt: 2.4 });
+    [-0.44, -0.22, 0, 0.22, 0.44].forEach((lz) => {
+      const podBox = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.09), garageDoorMat);
+      podBox.position.set(-0.13, 1.08, lz);
+      gantry.add(podBox);
+      const pod = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 8), raceLightMat);
+      pod.position.set(-0.17, 1.08, lz);
       gantry.add(pod);
     });
     yeongamCircuitGroup.add(gantry);
 
-    // 5. KIC Iconic Race Control Pavilion Tower (Korean Traditional Giwa Roof Motif)
-    const tcPos = worldPosition(34.7346, 126.4112);
-    const tcY = surfaceHeight(34.7346, 126.4112) + 0.05;
+    // 7. KIC Race Control Tower & Cantilevered Media Center (seated cleanly inside Paddock West apron, clear of T18!)
+    const tcPos = worldPosition(34.7348, 126.4136);
+    const tcY = surfaceHeight(34.7348, 126.4136) + 0.05;
     const tower = new THREE.Group();
     tower.position.set(tcPos.x, tcY, tcPos.z);
+    tower.rotation.y = -straightAngle;
 
-    const towerBase = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.35, 1.1), concreteMat);
-    towerBase.position.y = 0.175;
+    const mediaWing = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.44, 0.82), concreteMat);
+    mediaWing.position.set(0.78, 0.22, 0.06);
+    mediaWing.castShadow = true;
+    tower.add(mediaWing);
+    const mediaGlass = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.22, 0.86), glassMat);
+    mediaGlass.position.set(0.78, 0.29, 0.06);
+    tower.add(mediaGlass);
+
+    const towerBase = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.34, 1.04), concreteMat);
+    towerBase.position.y = 0.17;
     tower.add(towerBase);
-    const towerShaft = new THREE.Mesh(new THREE.BoxGeometry(0.74, 1.55, 0.74), concreteMat);
-    towerShaft.position.y = 1.05;
+
+    const towerShaft = new THREE.Mesh(new THREE.BoxGeometry(0.64, 1.56, 0.64), concreteMat);
+    towerShaft.position.y = 1.08;
     towerShaft.castShadow = true;
     tower.add(towerShaft);
-    const towerObs = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.38, 1.06), glassMat);
-    towerObs.position.y = 1.98;
-    tower.add(towerObs);
-    const giwaMat = new THREE.MeshStandardMaterial({ color: 0x262f3d, roughness: 0.58, metalness: 0.22 });
-    const giwaEaves = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.12, 1.52), giwaMat);
-    giwaEaves.position.y = 2.22;
+
+    const towerShaftRib = new THREE.Mesh(new THREE.BoxGeometry(0.20, 1.58, 0.70), redAccentMat);
+    towerShaftRib.position.y = 1.08;
+    tower.add(towerShaftRib);
+
+    const towerObsLower = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.24, 0.94), glassMat);
+    towerObsLower.position.y = 1.92;
+    tower.add(towerObsLower);
+
+    const towerObsUpper = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.26, 1.12), glassMat);
+    towerObsUpper.position.y = 2.20;
+    tower.add(towerObsUpper);
+
+    const giwaEaves = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.10, 1.48), giwaMat);
+    giwaEaves.position.y = 2.40;
     giwaEaves.castShadow = true;
     tower.add(giwaEaves);
-    const giwaRoof = new THREE.Mesh(new THREE.ConeGeometry(1.12, 0.52, 4), giwaMat);
-    giwaRoof.position.y = 2.52;
+
+    const giwaRoof = new THREE.Mesh(new THREE.ConeGeometry(1.06, 0.44, 4), giwaMat);
+    giwaRoof.position.y = 2.66;
     giwaRoof.rotation.y = Math.PI / 4;
     giwaRoof.castShadow = true;
     tower.add(giwaRoof);
+
+    const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, 0.62, 6), silverArmcoMat);
+    spire.position.y = 3.14;
+    tower.add(spire);
+
     yeongamCircuitGroup.add(tower);
 
-    // 6. Marina Curve Grandstand + Samho Yacht Lagoon Pier & Sailboats
-    const marStandPos = worldPosition(34.7294, 126.4232);
-    const marStand = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.52, 0.78), roofCanopyMat);
-    marStand.position.set(marStandPos.x, surfaceHeight(34.7294, 126.4232) + 0.28, marStandPos.z);
-    marStand.rotation.y = 0.65;
-    marStand.castShadow = true;
-    yeongamCircuitGroup.add(marStand);
+    // 8. Secondary Stadium Grandstands (Turn 1, Turn 3 Hairpin, Infield T5, Marina Waterfront T11-12) & Karting Center
+    function createSecondaryStand(lat, lng, widthX, rotY, accentMat) {
+      const sp = worldPosition(lat, lng);
+      const sy = surfaceHeight(lat, lng) + 0.05;
+      const st = new THREE.Group();
+      st.position.set(sp.x, sy, sp.z);
+      st.rotation.y = rotY;
 
-    const pierPos = worldPosition(34.7270, 126.4158);
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x9c6b49, roughness: 0.76, metalness: 0.05 });
-    const pier = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 3.2), woodMat);
-    pier.position.set(pierPos.x, -1.35, pierPos.z);
-    yeongamCircuitGroup.add(pier);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(widthX, 0.34, 0.72), concreteMat);
+      base.position.set(0, 0.17, 0);
+      base.castShadow = true;
+      base.receiveShadow = true;
+      st.add(base);
 
-    const hullMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35, metalness: 0.1 });
-    const sailMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, side: THREE.DoubleSide });
+      const seats = new THREE.Mesh(new THREE.BoxGeometry(widthX - 0.12, 0.16, 0.56), accentMat);
+      seats.position.set(0, 0.38, 0.08);
+      seats.rotation.x = 0.22;
+      st.add(seats);
+
+      const shadeRoof = new THREE.Mesh(new THREE.BoxGeometry(widthX + 0.14, 0.06, 0.84), roofCanopyMat);
+      shadeRoof.position.set(0, 0.72, 0.04);
+      shadeRoof.rotation.x = 0.14;
+      shadeRoof.castShadow = true;
+      st.add(shadeRoof);
+
+      [-widthX * 0.38, 0, widthX * 0.38].forEach((px) => {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.70, 0.08), steelMat);
+        post.position.set(px, 0.36, -0.30);
+        st.add(post);
+      });
+      return st;
+    }
+
+    yeongamCircuitGroup.add(
+      createSecondaryStand(34.7400, 126.4213, 2.2, -2.25, redAccentMat),  // Turn 1 Braking Stand
+      createSecondaryStand(34.7436, 126.4048, 2.5, 0.45, cobaltMat),      // Turn 3 Overtaking Hairpin Stand
+      createSecondaryStand(34.7416, 126.4096, 1.9, 0.12, cobaltMat),      // Infield Crest Stand
+      createSecondaryStand(34.7298, 126.4226, 2.6, 2.65, cobaltMat)       // Marina Waterfront Stand (Turns 11-12)
+    );
+
+    // KIC Karting & Driving Experience Center Building
+    const kartBldgPos = worldPosition(34.7347, 126.4052);
+    const kartBldg = new THREE.Group();
+    kartBldg.position.set(kartBldgPos.x, surfaceHeight(34.7347, 126.4052) + 0.05, kartBldgPos.z);
+    kartBldg.rotation.y = 0.18;
+    const kbCore = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.30, 0.52), concreteMat);
+    kbCore.position.y = 0.15;
+    kbCore.castShadow = true;
+    kartBldg.add(kbCore);
+    const kbRoof = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.06, 0.66), cobaltMat);
+    kbRoof.position.y = 0.33;
+    kartBldg.add(kbRoof);
+    yeongamCircuitGroup.add(kartBldg);
+
+    // 9. High-Mast Circuit Floodlight Towers around Main Straight, Paddock & Marina (InstancedMesh + Emissive Night Glow)
+    const lightTowerCoords = [
+      [34.7364, 126.4114], [34.7372, 126.4139], [34.7380, 126.4165], [34.7389, 126.4192],
+      [34.7399, 126.4198], [34.7429, 126.4060], [34.7423, 126.4040], [34.7382, 126.4148],
+      [34.7351, 126.4232], [34.7316, 126.4235], [34.7305, 126.4192], [34.7320, 126.4079]
+    ];
+    const mastPoleGeo = new THREE.CylinderGeometry(0.025, 0.048, 1.55, 6);
+    const mastHeadGeo = new THREE.BoxGeometry(0.26, 0.10, 0.08);
+    const floodLightMat = new THREE.MeshStandardMaterial({
+      color: 0xfefce8,
+      emissive: 0xfef08a,
+      emissiveIntensity: 0.32,
+      roughness: 0.25
+    });
+    yeongamEmissiveMaterials.push({ mat: floodLightMat, dayInt: 0.28, nightInt: 2.35 });
+
+    const mastPoles = new THREE.InstancedMesh(mastPoleGeo, silverArmcoMat, lightTowerCoords.length);
+    const mastHeads = new THREE.InstancedMesh(mastHeadGeo, floodLightMat, lightTowerCoords.length);
+    lightTowerCoords.forEach(([lLat, lLng], idx) => {
+      const lp = worldPosition(lLat, lLng);
+      const ly = surfaceHeight(lLat, lLng);
+      _dummy.position.set(lp.x, ly + 0.78, lp.z);
+      _dummy.rotation.set(0, idx * 0.52, 0);
+      _dummy.scale.set(1, 1, 1);
+      _dummy.updateMatrix();
+      mastPoles.setMatrixAt(idx, _dummy.matrix);
+
+      _dummy.position.set(lp.x, ly + 1.56, lp.z);
+      _dummy.rotation.set(0.32, idx * 0.52, 0);
+      _dummy.updateMatrix();
+      mastHeads.setMatrixAt(idx, _dummy.matrix);
+    });
+    mastPoles.instanceMatrix.needsUpdate = true;
+    mastHeads.instanceMatrix.needsUpdate = true;
+    yeongamCircuitGroup.add(mastPoles, mastHeads);
+
+    // 10. Yeongamho Waterfront Yacht Marina (Floating Pontoons + Composite Superyachts & Sailboats at true water level!)
+    const oceanY = getOceanSurfaceY();
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0xa47551, roughness: 0.74, metalness: 0.06 });
+    const hullMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.26, metalness: 0.14 });
+    const sailMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.52, side: THREE.DoubleSide });
+
+    const pierPos = worldPosition(34.7274, 126.4158);
+    const marinaGroup = new THREE.Group();
+    marinaGroup.position.set(pierPos.x, oceanY + 0.05, pierPos.z);
+
+    const mainSpine = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 3.6), woodMat);
+    marinaGroup.add(mainSpine);
+    [-1.1, -0.2, 0.7, 1.5].forEach((fz) => {
+      const finger = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.07, 0.18), woodMat);
+      finger.position.set(0, 0, fz);
+      marinaGroup.add(finger);
+    });
+    yeongamCircuitGroup.add(marinaGroup);
+
     [
-      [34.7252, 126.4145, 0.3],
-      [34.7256, 126.4172, -0.4],
-      [34.7244, 126.4192, 0.8],
-      [34.7250, 126.4126, -0.2]
-    ].forEach(([yLat, yLng, rotY]) => {
-      const yp = worldPosition(yLat, yLng);
+      { lat: 34.7276, lng: 126.4146, rotY: 0.08, type: 'motor' },
+      { lat: 34.7276, lng: 126.4170, rotY: -0.06, type: 'motor' },
+      { lat: 34.7266, lng: 126.4145, rotY: 0.12, type: 'sail' },
+      { lat: 34.7266, lng: 126.4171, rotY: -0.15, type: 'motor' },
+      { lat: 34.7254, lng: 126.4196, rotY: 0.65, type: 'sail' },
+      { lat: 34.7252, lng: 126.4122, rotY: -0.42, type: 'sail' }
+    ].forEach((yCfg) => {
+      const yp = worldPosition(yCfg.lat, yCfg.lng);
       const boat = new THREE.Group();
-      boat.position.set(yp.x, -1.42, yp.z);
-      boat.rotation.y = rotY;
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.78), hullMat);
+      boat.position.set(yp.x, oceanY + 0.05, yp.z);
+      boat.rotation.y = yCfg.rotY;
+
+      // Sculpted hull + pointed bow + teak aft deck
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.13, 0.78), hullMat);
+      hull.position.y = 0.04;
+      hull.castShadow = true;
       boat.add(hull);
-      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.95, 6), steelMat);
-      mast.position.y = 0.52;
-      boat.add(mast);
-      const sail = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.76, 3), sailMat);
-      sail.position.set(0, 0.54, 0.05);
-      sail.scale.set(0.15, 1, 1);
-      boat.add(sail);
+
+      const bow = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.34, 4), hullMat);
+      bow.rotation.x = Math.PI / 2;
+      bow.rotation.z = Math.PI / 4;
+      bow.scale.set(1, 1, 0.52);
+      bow.position.set(0, 0.05, 0.52);
+      boat.add(bow);
+
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.03, 0.74), cobaltMat);
+      stripe.position.y = 0.07;
+      boat.add(stripe);
+
+      if (yCfg.type === 'motor') {
+        // Luxury Motor Superyacht Flybridge & Radar Arch
+        const salon = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.11, 0.44), glassMat);
+        salon.position.set(0, 0.15, 0.02);
+        boat.add(salon);
+        const flybridge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.32), hullMat);
+        flybridge.position.set(0, 0.23, -0.04);
+        boat.add(flybridge);
+      } else {
+        // Racing Sailboat Cabin, Mast & Twin Sails
+        const deckHouse = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.32), glassMat);
+        deckHouse.position.set(0, 0.12, 0.02);
+        boat.add(deckHouse);
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 1.05, 6), silverArmcoMat);
+        mast.position.set(0, 0.58, 0.08);
+        boat.add(mast);
+        const mainSail = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.86, 3), sailMat);
+        mainSail.position.set(0, 0.58, -0.04);
+        mainSail.scale.set(0.12, 1, 1);
+        boat.add(mainSail);
+      }
       yeongamCircuitGroup.add(boat);
     });
 
-    // 7. 4 Animated GT / Formula Sports Cars racing continuously on KIC circuit
+    // 11. 6 Multi-Part Aerodynamic GT3 / Sports Prototype Race Cars with Contact Shadows
     const carConfigs = [
-      { color: 0xdc2626, phase: 0.03, speed: 0.031 }, // Racing Red
-      { color: 0x2563eb, phase: 0.18, speed: 0.029 }, // Works Blue
-      { color: 0xf59e0b, phase: 0.43, speed: 0.033 }, // GT Amber Gold
-      { color: 0x10b981, phase: 0.71, speed: 0.028 }  // Team Emerald
+      { color: 0xdc2626, accent: 0xf8fafc, phase: 0.02, speed: 0.030 }, // Scuderia / KIC Crimson GT3
+      { color: 0x2563eb, accent: 0xfacc15, phase: 0.14, speed: 0.029 }, // Works Cobalt Prototype
+      { color: 0xf59e0b, accent: 0x111827, phase: 0.31, speed: 0.032 }, // Papaya / Solar Amber GT
+      { color: 0x10b981, accent: 0xfef08a, phase: 0.51, speed: 0.028 }, // British / AMR Emerald GT3
+      { color: 0x38bdf8, accent: 0xef4444, phase: 0.69, speed: 0.031 }, // N-Performance Performance Blue
+      { color: 0xf8fafc, accent: 0xdc2626, phase: 0.86, speed: 0.030 }  // Weissach White Cup GT3
     ];
 
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.85, metalness: 0.05 });
-    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.18, metalness: 0.65 });
-    const headLightMat = new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfef08a, emissiveIntensity: 1.1 });
-    const tailLightMat = new THREE.MeshStandardMaterial({ color: 0xff2b2b, emissive: 0xdc2626, emissiveIntensity: 1.1 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.85, metalness: 0.08 });
+    const carbonMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45, metalness: 0.35 });
+    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.14, metalness: 0.72 });
+    const headLightMat = new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfef08a, emissiveIntensity: 1.25 });
+    const tailLightMat = new THREE.MeshStandardMaterial({ color: 0xff2b2b, emissive: 0xef4444, emissiveIntensity: 1.35 });
+    yeongamEmissiveMaterials.push(
+      { mat: headLightMat, dayInt: 1.1, nightInt: 2.6 },
+      { mat: tailLightMat, dayInt: 1.2, nightInt: 2.6 }
+    );
+
+    const contactShadowGeo = new THREE.PlaneGeometry(0.62, 1.24);
+    contactShadowGeo.rotateX(-Math.PI / 2);
+    const contactShadowMat = new THREE.MeshBasicMaterial({
+      color: 0x090d14,
+      transparent: true,
+      opacity: 0.46,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -3
+    });
+
+    const wheelGeo = new THREE.CylinderGeometry(0.078, 0.078, 0.085, 10);
+    wheelGeo.rotateZ(Math.PI / 2);
 
     carConfigs.forEach((cfg) => {
       const car = new THREE.Group();
-      const bodyMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.28, metalness: 0.42 });
+      const bodyMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.24, metalness: 0.46 });
+      const stripeMat = new THREE.MeshStandardMaterial({ color: cfg.accent, roughness: 0.32, metalness: 0.25 });
 
-      const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.15, 1.08), bodyMat);
+      // Ground contact shadow plane
+      const shadowDisc = new THREE.Mesh(contactShadowGeo, contactShadowMat);
+      shadowDisc.position.y = 0.012;
+      car.add(shadowDisc);
+
+      // Front carbon aero splitter + rear diffuser
+      const splitter = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.028, 1.12), carbonMat);
+      splitter.position.y = 0.048;
+      car.add(splitter);
+
+      // Sculpted widebody GT3 lower chassis + central livery racing stripe
+      const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 1.04), bodyMat);
       chassis.position.y = 0.11;
       chassis.castShadow = true;
       car.add(chassis);
 
-      const canopyGlass = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.13, 0.46), cabinMat);
-      canopyGlass.position.set(0, 0.21, -0.02);
+      const liveryStripe = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.126, 1.045), stripeMat);
+      liveryStripe.position.y = 0.112;
+      car.add(liveryStripe);
+
+      // Teardrop dark cockpit greenhouse + shark-fin intake
+      const canopyGlass = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.11, 0.44), cabinMat);
+      canopyGlass.position.set(0, 0.20, -0.02);
       car.add(canopyGlass);
 
-      const rearWing = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.04, 0.14), tireMat);
-      rearWing.position.set(0, 0.27, -0.46);
+      const sharkFin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.09, 0.28), carbonMat);
+      sharkFin.position.set(0, 0.22, -0.28);
+      car.add(sharkFin);
+
+      // Swan-neck carbon GT Rear Wing + twin endplates
+      const rearWing = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.028, 0.13), carbonMat);
+      rearWing.position.set(0, 0.27, -0.47);
       car.add(rearWing);
+      [-0.25, 0.25].forEach((epX) => {
+        const endplate = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, 0.15), stripeMat);
+        endplate.position.set(epX, 0.26, -0.47);
+        car.add(endplate);
+      });
 
-      const headlight = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.05, 0.04), headLightMat);
-      headlight.position.set(0, 0.12, 0.54);
-      car.add(headlight);
-
-      const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.04), tailLightMat);
-      taillight.position.set(0, 0.13, -0.54);
+      // Endurance LED headlights + full-width crimson LED tail-bar
+      [-0.15, 0.15].forEach((hlX) => {
+        const hl = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.04, 0.04), headLightMat);
+        hl.position.set(hlX, 0.11, 0.52);
+        car.add(hl);
+      });
+      const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.038, 0.04), tailLightMat);
+      taillight.position.set(0, 0.13, -0.52);
       car.add(taillight);
 
-      const wheelGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.08, 8);
-      wheelGeo.rotateZ(Math.PI / 2);
       [
-        [-0.24, 0.08, 0.34],
-        [0.24, 0.08, 0.34],
-        [-0.24, 0.08, -0.34],
-        [0.24, 0.08, -0.34]
+        [-0.23, 0.078, 0.33],
+        [0.23, 0.078, 0.33],
+        [-0.23, 0.078, -0.33],
+        [0.23, 0.078, -0.33]
       ].forEach(([wx, wy, wz]) => {
         const wheel = new THREE.Mesh(wheelGeo, tireMat);
         wheel.position.set(wx, wy, wz);
@@ -4410,16 +5181,569 @@
       });
 
       yeongamTrackCurve.getPointAt(cfg.phase, _carPos);
-      yeongamTrackCurve.getPointAt((cfg.phase + 0.01) % 1, _carNextPos);
-      car.position.copy(_carPos);
-      car.position.y += 0.06;
-      car.lookAt(_carNextPos.x, _carNextPos.y + 0.06, _carNextPos.z);
+      yeongamTrackCurve.getPointAt((cfg.phase + 0.008) % 1, _carNextPos);
+      car.position.set(_carPos.x, _carPos.y + 0.025, _carPos.z);
+      car.lookAt(_carNextPos.x, _carNextPos.y + 0.025, _carNextPos.z);
 
       yeongamCircuitGroup.add(car);
-      yeongamAnimCars.push({ mesh: car, phase: cfg.phase, speed: cfg.speed });
+      yeongamAnimCars.push({ mesh: car, phase: cfg.phase, speed: cfg.speed, speedProfile });
     });
 
     scene.add(yeongamCircuitGroup);
+  }
+
+  function buildDanyangLandmarks() {
+    if (danyangLandmarksGroup) {
+      disposeObject(danyangLandmarksGroup);
+      danyangLandmarksGroup = null;
+      danyangWaterAccentsGroup = null;
+    }
+    if (currentRegionId !== 'danyang') return;
+
+    danyangLandmarksGroup = new THREE.Group();
+    danyangLandmarksGroup.name = 'danyang-landmarks';
+
+    danyangWaterAccentsGroup = new THREE.Group();
+    danyangWaterAccentsGroup.name = 'danyang-water-accents';
+    danyangWaterAccentsGroup.visible = state.showOcean;
+    danyangLandmarksGroup.add(danyangWaterAccentsGroup);
+
+    const concreteMat = new THREE.MeshStandardMaterial({ color: 0xd9e0e6, roughness: 0.72, metalness: 0.08 });
+    const darkConcreteMat = new THREE.MeshStandardMaterial({ color: 0x8b96a2, roughness: 0.80, metalness: 0.10 });
+    const asphaltMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.85, metalness: 0.05 });
+    const karstRockMat = new THREE.MeshStandardMaterial({ color: 0xaeb6ae, roughness: 0.88, metalness: 0.03, flatShading: true });
+    const paleGraniteMat = new THREE.MeshStandardMaterial({ color: 0xcbc9c0, roughness: 0.84, metalness: 0.04, flatShading: true });
+    const pineFoliageMat = new THREE.MeshStandardMaterial({ color: 0x2f5e39, roughness: 0.90, metalness: 0.02, flatShading: true });
+    const mapleFoliageMat = new THREE.MeshStandardMaterial({ color: 0xb94e32, roughness: 0.88, metalness: 0.02, flatShading: true });
+    const crimsonSteelMat = new THREE.MeshStandardMaterial({ color: 0xc2382b, roughness: 0.42, metalness: 0.45 });
+    const blueSteelMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.40, metalness: 0.42 });
+    const whiteSteelMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.34, metalness: 0.36 });
+    const pavilionWoodMat = new THREE.MeshStandardMaterial({ color: 0x8c2f23, roughness: 0.65, metalness: 0.06 });
+    const tileRoofMat = new THREE.MeshStandardMaterial({ color: 0x27303a, roughness: 0.58, metalness: 0.14 });
+    const skyGlassMat = new THREE.MeshStandardMaterial({
+      color: 0x7dd3fc,
+      roughness: 0.15,
+      metalness: 0.55,
+      transparent: true,
+      opacity: 0.82
+    });
+    const warmBeaconMat = new THREE.MeshStandardMaterial({
+      color: 0xfef3c7,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.28,
+      roughness: 0.3
+    });
+    regionalEmissiveMaterials.push({ mat: warmBeaconMat, dayInt: 0.22, nightInt: 1.45 });
+
+    const foamMat = new THREE.MeshBasicMaterial({
+      color: 0xe6f8fc,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    // -------------------------------------------------------------------------
+    // 1. Chungju Concrete Gravity Dam (충주댐, 97.5m high, 447m crest) & Observatory
+    // -------------------------------------------------------------------------
+    {
+      const damPos = worldPosition(37.0016, 127.9926);
+      const lakeSurfY = surfaceHeight(37.0016, 127.9975);
+      const tailSurfY = surfaceHeight(37.0016, 127.9885);
+      const crestY = Math.max(lakeSurfY + 0.28, tailSurfY + 1.05);
+      const damBaseY = Math.max(0.05, tailSurfY - 0.18);
+      const damH = Math.max(0.85, crestY - damBaseY);
+      const damSpanZ = 2.65;
+
+      const damGroup = new THREE.Group();
+      damGroup.position.set(damPos.x, damBaseY, damPos.z);
+
+      // Sloped concrete gravity dam profile in X-Y plane (upstream +X vertical, downstream -X sloped)
+      const damShape = new THREE.Shape();
+      damShape.moveTo(0.26, 0);
+      damShape.lineTo(0.26, damH);
+      damShape.lineTo(-0.14, damH);
+      damShape.lineTo(-0.78, damH * 0.16);
+      damShape.lineTo(-0.92, 0);
+      damShape.closePath();
+
+      const damGeo = new THREE.ExtrudeGeometry(damShape, {
+        depth: damSpanZ,
+        bevelEnabled: false,
+        steps: 1
+      });
+      damGeo.translate(0, 0, -damSpanZ * 0.5);
+      const damWall = new THREE.Mesh(damGeo, concreteMat);
+      damWall.castShadow = true;
+      damWall.receiveShadow = true;
+      damGroup.add(damWall);
+
+      // Crest roadway & guardrails
+      const crestRoad = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.06, damSpanZ + 0.24), asphaltMat);
+      crestRoad.position.set(0.06, damH + 0.03, 0);
+      damGroup.add(crestRoad);
+
+      // 5 Spillway piers + radial taintor gates along center of dam crest
+      const gateMat = new THREE.MeshStandardMaterial({ color: 0x3b6e8c, roughness: 0.45, metalness: 0.45 });
+      for (let i = -2; i <= 2; i++) {
+        const gz = i * 0.34;
+        const pier = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.26, 0.08), darkConcreteMat);
+        pier.position.set(0.02, damH + 0.11, gz - 0.17);
+        pier.castShadow = true;
+        damGroup.add(pier);
+
+        const gate = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.20, 0.24), gateMat);
+        gate.position.set(0.14, damH - 0.06, gz);
+        damGroup.add(gate);
+
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), warmBeaconMat);
+        lamp.position.set(0.02, damH + 0.27, gz - 0.17);
+        damGroup.add(lamp);
+      }
+      const endPier = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.26, 0.08), darkConcreteMat);
+      endPier.position.set(0.02, damH + 0.11, 2 * 0.34 + 0.17);
+      damGroup.add(endPier);
+
+      // Downstream Hydroelectric Powerhouse (충주수력발전소) at south toe
+      const powerHouse = new THREE.Mesh(new THREE.BoxGeometry(0.62, damH * 0.38, 0.78), whiteSteelMat);
+      powerHouse.position.set(-0.76, damH * 0.19, 0.72);
+      powerHouse.castShadow = true;
+      damGroup.add(powerHouse);
+
+      const powerRoof = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.06, 0.82), blueSteelMat);
+      powerRoof.position.set(-0.76, damH * 0.38 + 0.03, 0.72);
+      damGroup.add(powerRoof);
+
+      danyangLandmarksGroup.add(damGroup);
+
+      // Foamy spillway tailrace apron & downstream whitewater shimmer
+      const tailFoam = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 1.45), foamMat);
+      tailFoam.rotation.x = -Math.PI / 2;
+      tailFoam.position.set(damPos.x - 1.25, tailSurfY + 0.06, damPos.z - 0.12);
+      danyangWaterAccentsGroup.add(tailFoam);
+
+      // Chungju Dam Water Culture Observatory Tower (물문화관 전망대) on north abutment
+      const obsPos = worldPosition(37.0038, 127.9945);
+      const obsY = surfaceHeight(37.0038, 127.9945);
+      const obsGroup = new THREE.Group();
+      obsGroup.position.set(obsPos.x, obsY, obsPos.z);
+
+      const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.54, 0.26, 12), concreteMat);
+      podium.position.y = 0.13;
+      podium.castShadow = true;
+      obsGroup.add(podium);
+
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.20, 0.78, 10), whiteSteelMat);
+      shaft.position.y = 0.56;
+      shaft.castShadow = true;
+      obsGroup.add(shaft);
+
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.26, 0.20, 12), skyGlassMat);
+      crown.position.y = 0.98;
+      obsGroup.add(crown);
+
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.36, 0.07, 12), whiteSteelMat);
+      cap.position.y = 1.11;
+      obsGroup.add(cap);
+
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), warmBeaconMat);
+      beacon.position.y = 1.20;
+      obsGroup.add(beacon);
+
+      danyangLandmarksGroup.add(obsGroup);
+    }
+
+    // Helper for traditional Korean hexagonal pavilion (정자)
+    function createKoreanPavilion(scale) {
+      const s = scale || 1.0;
+      const g = new THREE.Group();
+      const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * s, 0.28 * s, 0.10 * s, 6), concreteMat);
+      plinth.position.y = 0.05 * s;
+      g.add(plinth);
+
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * Math.PI * 2;
+        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.025 * s, 0.025 * s, 0.22 * s, 6), pavilionWoodMat);
+        col.position.set(Math.cos(ang) * 0.17 * s, 0.20 * s, Math.sin(ang) * 0.17 * s);
+        g.add(col);
+      }
+
+      const roofLower = new THREE.Mesh(new THREE.ConeGeometry(0.34 * s, 0.16 * s, 6), tileRoofMat);
+      roofLower.position.y = 0.37 * s;
+      roofLower.castShadow = true;
+      g.add(roofLower);
+
+      const finial = new THREE.Mesh(new THREE.ConeGeometry(0.08 * s, 0.08 * s, 6), warmBeaconMat);
+      finial.position.y = 0.47 * s;
+      g.add(finial);
+      return g;
+    }
+
+    // Helper for sightseeing ferry / excursion boat (유람선)
+    function createCruiseBoat(lat, lng, yawRad, scale) {
+      const s = scale || 1.0;
+      const pos = worldPosition(lat, lng);
+      const wy = surfaceHeight(lat, lng) + 0.035;
+      const boat = new THREE.Group();
+      boat.position.set(pos.x, wy, pos.z);
+      boat.rotation.y = yawRad;
+
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, 0.10 * s, 0.74 * s), whiteSteelMat);
+      hull.position.y = 0.05 * s;
+      hull.castShadow = true;
+      boat.add(hull);
+
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.29 * s, 0.03 * s, 0.75 * s), blueSteelMat);
+      stripe.position.y = 0.08 * s;
+      boat.add(stripe);
+
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.22 * s, 0.11 * s, 0.48 * s), skyGlassMat);
+      cabin.position.set(0, 0.15 * s, -0.02 * s);
+      boat.add(cabin);
+
+      const upperDeck = new THREE.Mesh(new THREE.BoxGeometry(0.24 * s, 0.04 * s, 0.52 * s), whiteSteelMat);
+      upperDeck.position.set(0, 0.22 * s, -0.02 * s);
+      boat.add(upperDeck);
+
+      const cabinGlow = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.06 * s, 0.34 * s), warmBeaconMat);
+      cabinGlow.position.set(0, 0.14 * s, -0.02 * s);
+      boat.add(cabinGlow);
+
+      danyangLandmarksGroup.add(boat);
+
+      // Subtle V-wake behind cruise boat
+      const wakeGeo = new THREE.RingGeometry(0.14 * s, 0.42 * s, 16, 1, Math.PI * 1.25, Math.PI * 0.5);
+      wakeGeo.rotateX(-Math.PI / 2);
+      const wake = new THREE.Mesh(wakeGeo, foamMat);
+      wake.position.set(pos.x, wy + 0.015, pos.z);
+      wake.rotation.y = yawRad;
+      danyangWaterAccentsGroup.add(wake);
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Dodamsambong (도담삼봉, 제1경) & Seokmun Stone Arch (석문, 제2경)
+    // -------------------------------------------------------------------------
+    {
+      const centerPos = worldPosition(36.9916, 128.3432);
+      const riverLevelY = surfaceHeight(36.9916, 128.3472);
+
+      const sambongSpecs = [
+        // Cheopbong (첩봉, NW peak)
+        { dx: -0.52, dz: -0.26, rBot: 0.30, rTop: 0.11, h: 0.68, tiltZ: 0.14, pavilion: false },
+        // Janggunbong (장군봉, tallest central peak with hexagonal Sambong Pavilion)
+        { dx: 0.0, dz: 0.0, rBot: 0.42, rTop: 0.18, h: 0.96, tiltZ: -0.05, pavilion: true },
+        // Cheobong (처봉, SE peak)
+        { dx: 0.54, dz: 0.24, rBot: 0.33, rTop: 0.13, h: 0.74, tiltZ: -0.11, pavilion: false }
+      ];
+
+      sambongSpecs.forEach((sp, idx) => {
+        const peakGrp = new THREE.Group();
+        peakGrp.position.set(centerPos.x + sp.dx, riverLevelY - 0.08, centerPos.z + sp.dz);
+
+        const mainCrag = new THREE.Mesh(
+          new THREE.CylinderGeometry(sp.rTop, sp.rBot, sp.h, 7),
+          karstRockMat
+        );
+        mainCrag.position.y = sp.h * 0.5;
+        mainCrag.rotation.z = sp.tiltZ;
+        mainCrag.rotation.y = idx * 1.1;
+        mainCrag.castShadow = true;
+        mainCrag.receiveShadow = true;
+        peakGrp.add(mainCrag);
+
+        const shoulder = new THREE.Mesh(
+          new THREE.DodecahedronGeometry(sp.rBot * 0.62, 0),
+          karstRockMat
+        );
+        shoulder.position.set(sp.rBot * 0.35, sp.h * 0.34, -sp.rBot * 0.2);
+        shoulder.castShadow = true;
+        peakGrp.add(shoulder);
+
+        const pineTuft = new THREE.Mesh(
+          new THREE.ConeGeometry(sp.rTop * 0.85, 0.22, 6),
+          idx === 1 ? pineFoliageMat : mapleFoliageMat
+        );
+        pineTuft.position.set(-sp.rTop * 0.35, sp.h * 0.78, sp.rTop * 0.2);
+        peakGrp.add(pineTuft);
+
+        if (sp.pavilion) {
+          const pav = createKoreanPavilion(0.82);
+          pav.position.set(0.02, sp.h - 0.02, 0);
+          peakGrp.add(pav);
+        }
+
+        danyangLandmarksGroup.add(peakGrp);
+
+        const waterRing = new THREE.Mesh(
+          new THREE.RingGeometry(sp.rBot * 0.92, sp.rBot * 1.32, 18),
+          foamMat
+        );
+        waterRing.rotation.x = -Math.PI / 2;
+        waterRing.position.set(centerPos.x + sp.dx, riverLevelY + 0.05, centerPos.z + sp.dz);
+        danyangWaterAccentsGroup.add(waterRing);
+      });
+
+      // Seokmun (석문, 제2경) Natural Karst Stone Rainbow Arch on north cliff
+      const seokPos = worldPosition(36.9985, 128.3398);
+      const seokY = surfaceHeight(36.9985, 128.3398);
+      const seokGrp = new THREE.Group();
+      seokGrp.position.set(seokPos.x, seokY - 0.08, seokPos.z);
+      seokGrp.rotation.y = 0.42;
+
+      const archMesh = new THREE.Mesh(
+        new THREE.TorusGeometry(0.42, 0.14, 7, 14, Math.PI),
+        karstRockMat
+      );
+      archMesh.position.y = 0.28;
+      archMesh.castShadow = true;
+      seokGrp.add(archMesh);
+
+      [-0.40, 0.40].forEach((px) => {
+        const pierRock = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.42, 6), karstRockMat);
+        pierRock.position.set(px, 0.16, 0);
+        pierRock.castShadow = true;
+        seokGrp.add(pierRock);
+      });
+      danyangLandmarksGroup.add(seokGrp);
+
+      createCruiseBoat(36.9902, 128.3468, -0.65, 0.9);
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Oksun Bridge (옥순대교), Oksunbong (제4경), Gudambong (제3경) & Cruise Boats
+    // -------------------------------------------------------------------------
+    {
+      const pNorth = worldPosition(36.9426, 128.2146);
+      const pSouth = worldPosition(36.9378, 128.2184);
+      const lakeY = surfaceHeight(36.9402, 128.2165);
+      const midX = (pNorth.x + pSouth.x) * 0.5;
+      const midZ = (pNorth.z + pSouth.z) * 0.5;
+      const spanLen = Math.hypot(pSouth.x - pNorth.x, pSouth.z - pNorth.z);
+      const yaw = Math.atan2(pSouth.x - pNorth.x, pSouth.z - pNorth.z);
+      const deckY = lakeY + 0.52;
+
+      const oksunBridge = new THREE.Group();
+      oksunBridge.position.set(midX, deckY, midZ);
+      oksunBridge.rotation.y = yaw;
+
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.08, spanLen + 0.4), asphaltMat);
+      deck.castShadow = true;
+      oksunBridge.add(deck);
+
+      const deckTrim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, spanLen + 0.4), crimsonSteelMat);
+      deckTrim.position.y = -0.03;
+      oksunBridge.add(deckTrim);
+
+      // Twin crimson tied-arch ribs + vertical hangers
+      const archRadius = spanLen * 0.38;
+      [-0.17, 0.17].forEach((offsetX) => {
+        const arch = new THREE.Mesh(
+          new THREE.TorusGeometry(archRadius, 0.045, 8, 20, Math.PI),
+          crimsonSteelMat
+        );
+        arch.rotation.y = Math.PI / 2;
+        arch.scale.set(1.0, 0.62, 1.0);
+        arch.castShadow = true;
+        oksunBridge.add(arch);
+      });
+
+      for (let h = -3; h <= 3; h++) {
+        const hz = (h / 4) * archRadius * 0.88;
+        const hangerH = Math.max(0.1, Math.sqrt(Math.max(0, archRadius * archRadius - hz * hz)) * 0.60);
+        [-0.17, 0.17].forEach((offsetX) => {
+          const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, hangerH, 5), whiteSteelMat);
+          strut.position.set(offsetX, hangerH * 0.5, hz);
+          oksunBridge.add(strut);
+        });
+      }
+
+      // Concrete water piers grounded into lake bed
+      [-archRadius, archRadius].forEach((pz) => {
+        const pier = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 0.78, 8), concreteMat);
+        pier.position.set(0, -0.39, pz);
+        oksunBridge.add(pier);
+      });
+
+      danyangLandmarksGroup.add(oksunBridge);
+
+      // Oksunbong (옥순봉, 제4경) bamboo-shoot stone spires on north gorge cliff
+      const oksunPos = worldPosition(36.9438, 128.2225);
+      const oksunBaseY = surfaceHeight(36.9438, 128.2225) - 0.12;
+      const oksunSpires = new THREE.Group();
+      oksunSpires.position.set(oksunPos.x, oksunBaseY, oksunPos.z);
+      [
+        [-0.36, 0.08, 0.16, 0.85],
+        [-0.12, -0.06, 0.20, 1.08],
+        [0.14, 0.04, 0.18, 0.96],
+        [0.38, -0.05, 0.15, 0.78],
+        [0.02, 0.22, 0.14, 0.72]
+      ].forEach(([sx, sz, sr, sh], idx) => {
+        const spire = new THREE.Mesh(new THREE.CylinderGeometry(sr * 0.36, sr, sh, 6), paleGraniteMat);
+        spire.position.set(sx, sh * 0.5, sz);
+        spire.rotation.y = idx * 0.8;
+        spire.castShadow = true;
+        oksunSpires.add(spire);
+      });
+      danyangLandmarksGroup.add(oksunSpires);
+
+      // Gudambong (구담봉, 제3경) tortoise-shell cliff crag on south gorge ridge
+      const gudamPos = worldPosition(36.9382, 128.2365);
+      const gudamBaseY = surfaceHeight(36.9382, 128.2365) - 0.10;
+      const gudamGrp = new THREE.Group();
+      gudamGrp.position.set(gudamPos.x, gudamBaseY, gudamPos.z);
+
+      const tortoiseShell = new THREE.Mesh(new THREE.DodecahedronGeometry(0.46, 0), paleGraniteMat);
+      tortoiseShell.scale.set(1.35, 1.15, 0.95);
+      tortoiseShell.position.y = 0.42;
+      tortoiseShell.castShadow = true;
+      gudamGrp.add(tortoiseShell);
+
+      const tortoiseHead = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.24, 0.62, 6), paleGraniteMat);
+      tortoiseHead.position.set(-0.42, 0.48, -0.18);
+      tortoiseHead.rotation.z = 0.28;
+      tortoiseHead.castShadow = true;
+      gudamGrp.add(tortoiseHead);
+      danyangLandmarksGroup.add(gudamGrp);
+
+      // Janghoe Ferry Dock (장회나루) & Chungjuho Sightseeing Boats
+      const pierPos = worldPosition(36.9365, 128.2392);
+      const pierY = surfaceHeight(36.9395, 128.2375) + 0.05;
+      const janghoeDock = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.28), whiteSteelMat);
+      janghoeDock.position.set(pierPos.x, pierY, pierPos.z);
+      danyangLandmarksGroup.add(janghoeDock);
+
+      createCruiseBoat(36.9405, 128.2295, 1.42, 1.1);
+      createCruiseBoat(36.9865, 128.1020, 1.65, 1.15);
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. Mancheonha Skywalk (만천하 스카이워크), Gosu Bridge, Cheongpung Bridge & Sainam
+    // -------------------------------------------------------------------------
+    {
+      // Mancheonha Spiral Observation Tower & 3-Finger Cantilevered Skywalk
+      const mcPos = worldPosition(36.9685, 128.3490);
+      const mcY = surfaceHeight(36.9685, 128.3490);
+      const mcGroup = new THREE.Group();
+      mcGroup.position.set(mcPos.x, mcY - 0.05, mcPos.z);
+
+      const basePad = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.16, 16), concreteMat);
+      basePad.position.y = 0.08;
+      mcGroup.add(basePad);
+
+      // Central structural columns + 3 inclined spiral ramp rings
+      for (let c = 0; c < 4; c++) {
+        const ang = (c / 4) * Math.PI * 2;
+        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.92, 6), whiteSteelMat);
+        col.position.set(Math.cos(ang) * 0.24, 0.50, Math.sin(ang) * 0.24);
+        col.castShadow = true;
+        mcGroup.add(col);
+      }
+      [0.28, 0.56, 0.84].forEach((ry, idx) => {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.045, 7, 20), whiteSteelMat);
+        ring.rotation.x = Math.PI / 2 + (idx < 2 ? 0.09 : 0);
+        ring.position.y = ry;
+        ring.castShadow = true;
+        mcGroup.add(ring);
+      });
+
+      // 3-Finger cantilevered glass skywalk extending out over the Namhangang horseshoe cliff
+      [-0.36, 0.0, 0.36].forEach((angOffset) => {
+        const finger = new THREE.Group();
+        finger.position.set(0, 0.90, 0);
+        finger.rotation.y = 1.15 + angOffset;
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.68), whiteSteelMat);
+        beam.position.z = 0.36;
+        beam.castShadow = true;
+        finger.add(beam);
+        const glassDeck = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.30), skyGlassMat);
+        glassDeck.position.set(0, 0.02, 0.58);
+        finger.add(glassDeck);
+        mcGroup.add(finger);
+      });
+
+      const mcBeacon = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), warmBeaconMat);
+      mcBeacon.position.y = 0.98;
+      mcGroup.add(mcBeacon);
+      danyangLandmarksGroup.add(mcGroup);
+
+      // Gosu Bridge (고수대교) arched steel truss bridge at Danyang town waterfront
+      const gosuW = worldPosition(36.9844, 128.3596);
+      const gosuE = worldPosition(36.9832, 128.3654);
+      const gosuY = surfaceHeight(36.9838, 128.3625) + 0.38;
+      const gosuLen = Math.hypot(gosuE.x - gosuW.x, gosuE.z - gosuW.z);
+      const gosuGrp = new THREE.Group();
+      gosuGrp.position.set((gosuW.x + gosuE.x) * 0.5, gosuY, (gosuW.z + gosuE.z) * 0.5);
+      gosuGrp.rotation.y = Math.atan2(gosuE.x - gosuW.x, gosuE.z - gosuW.z);
+
+      const gosuDeck = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.07, gosuLen + 0.3), asphaltMat);
+      gosuGrp.add(gosuDeck);
+      [-gosuLen * 0.24, gosuLen * 0.24].forEach((az) => {
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(gosuLen * 0.22, 0.035, 6, 16, Math.PI), blueSteelMat);
+        arch.rotation.y = Math.PI / 2;
+        arch.scale.set(1.0, 0.55, 1.0);
+        arch.position.z = az;
+        gosuGrp.add(arch);
+      });
+      danyangLandmarksGroup.add(gosuGrp);
+
+      // Cheongpung Cable-Stayed Bridge (청풍대교) & Bibongsan Summit Observatory
+      const cpN = worldPosition(37.0038, 128.1652);
+      const cpS = worldPosition(36.9972, 128.1668);
+      const cpY = surfaceHeight(37.0005, 128.1660) + 0.48;
+      const cpLen = Math.hypot(cpS.x - cpN.x, cpS.z - cpN.z);
+      const cpBridge = new THREE.Group();
+      cpBridge.position.set((cpN.x + cpS.x) * 0.5, cpY, (cpN.z + cpS.z) * 0.5);
+      cpBridge.rotation.y = Math.atan2(cpS.x - cpN.x, cpS.z - cpN.z);
+
+      cpBridge.add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, cpLen + 0.3), whiteSteelMat));
+      const cableLineMat = new THREE.LineBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.78 });
+      [-cpLen * 0.22, cpLen * 0.22].forEach((pz) => {
+        const pylon = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.35, 0.12), whiteSteelMat);
+        pylon.position.set(0, 0.36, pz);
+        pylon.castShadow = true;
+        cpBridge.add(pylon);
+
+        const cPts = [];
+        [-0.75, -0.45, 0.45, 0.75].forEach((off) => {
+          cPts.push(new THREE.Vector3(0, 0.98, pz), new THREE.Vector3(0, 0.04, pz + off));
+        });
+        cpBridge.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(cPts), cableLineMat));
+      });
+      danyangLandmarksGroup.add(cpBridge);
+
+      const bibongPos = worldPosition(36.9912, 128.1642);
+      const bibongY = surfaceHeight(36.9912, 128.1642);
+      const bibongStn = new THREE.Group();
+      bibongStn.position.set(bibongPos.x, bibongY - 0.04, bibongPos.z);
+      const stnBox = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.26, 0.36), whiteSteelMat);
+      stnBox.position.y = 0.13;
+      stnBox.castShadow = true;
+      bibongStn.add(stnBox);
+      const stnDeck = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.08, 0.44), skyGlassMat);
+      stnDeck.position.y = 0.30;
+      bibongStn.add(stnDeck);
+      danyangLandmarksGroup.add(bibongStn);
+
+      // Sainam (사인암, 제5경) 70m Vertical Grid-Jointed Sheer Cliff + Cheongnyeonam Pavilion
+      const sainamPos = worldPosition(36.9155, 128.3588);
+      const sainamY = surfaceHeight(36.9155, 128.3580);
+      const sainamGrp = new THREE.Group();
+      sainamGrp.position.set(sainamPos.x, sainamY - 0.08, sainamPos.z);
+
+      for (let b = -2; b <= 2; b++) {
+        const colH = 0.88 + (2 - Math.abs(b)) * 0.14;
+        const monolith = new THREE.Mesh(new THREE.BoxGeometry(0.18, colH, 0.24), paleGraniteMat);
+        monolith.position.set(0.18, colH * 0.5, b * 0.20);
+        monolith.castShadow = true;
+        sainamGrp.add(monolith);
+      }
+      const sainamPav = createKoreanPavilion(0.76);
+      sainamPav.position.set(-0.22, 0.06, 0.05);
+      sainamGrp.add(sainamPav);
+      danyangLandmarksGroup.add(sainamGrp);
+    }
+
+    scene.add(danyangLandmarksGroup);
   }
 
   function buildHaeundaeLandmarks() {
@@ -7122,11 +8446,13 @@
       if (yeongamTrackCurve && yeongamAnimCars.length > 0) {
         for (let i = 0; i < yeongamAnimCars.length; i++) {
           const car = yeongamAnimCars[i];
-          car.phase = (car.phase + delta * car.speed) % 1;
+          const prof = car.speedProfile;
+          const cornerMult = prof ? prof[Math.min(prof.length - 1, (car.phase * prof.length) | 0)] : 1.0;
+          car.phase = (car.phase + delta * car.speed * cornerMult) % 1;
           yeongamTrackCurve.getPointAt(car.phase, _carPos);
           yeongamTrackCurve.getPointAt((car.phase + 0.008) % 1, _carNextPos);
-          car.mesh.position.set(_carPos.x, _carPos.y + 0.06, _carPos.z);
-          car.mesh.lookAt(_carNextPos.x, _carNextPos.y + 0.06, _carNextPos.z);
+          car.mesh.position.set(_carPos.x, _carPos.y + 0.025, _carPos.z);
+          car.mesh.lookAt(_carNextPos.x, _carNextPos.y + 0.025, _carNextPos.z);
         }
       }
       if (!droneMode) controls.update();

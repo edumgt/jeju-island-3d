@@ -12,7 +12,8 @@
     haeundae: { lat: 35.166, lng: 129.165 },
     incheon: { lat: 37.445, lng: 126.55 },
     gangneung: { lat: 37.90, lng: 128.72 },
-    yeongam: { lat: 34.745, lng: 126.44 }
+    yeongam: { lat: 34.745, lng: 126.44 },
+    danyang: { lat: 36.965, lng: 128.220 }
   };
 
   function parseCoordinateQuery(raw) {

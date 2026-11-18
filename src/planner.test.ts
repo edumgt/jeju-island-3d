@@ -25,6 +25,9 @@ const REGIONS = {
   },
   yeongam: {
     bounds: { west: 126.382, south: 34.712, east: 126.498, north: 34.782 }
+  },
+  danyang: {
+    bounds: { west: 127.940, south: 36.835, east: 128.500, north: 37.065 }
   }
 };
 
@@ -496,8 +499,8 @@ test('TerrainOptimizer generates watertight adaptive quadtree mesh for gangneung
   }
 });
 
-test('ClimateData provides valid 12-month climatological normals and summaries for all 5 regions', () => {
-  const regionIds = ['jeju', 'haeundae', 'incheon', 'gangneung', 'yeongam'] as const;
+test('ClimateData provides valid 12-month climatological normals and summaries for all 6 regions', () => {
+  const regionIds = ['jeju', 'haeundae', 'incheon', 'gangneung', 'yeongam', 'danyang'] as const;
   for (const id of regionIds) {
     const profile = ClimateData.getClimateProfile(id);
     assert.equal(profile.regionId, id);
@@ -565,12 +568,58 @@ test('cleanState and share URL params persist climateOverlayOpen and climateChar
   assert.equal(decoded.climateChartMode, 'marine');
 });
 
-test('cleanState, share URL params, and TerrainOptimizer support Yeongam KIC sports car circuit', () => {
+test('cleanState, share URL params, yeongam-data track geometry, and TerrainOptimizer support Yeongam KIC sports car circuit', async () => {
+  (globalThis as any).window = globalThis;
+  await import('../assets/yeongam-data.js');
+  const win = globalThis as any;
+
+  assert.ok(Array.isArray(win.YEONGAM_CIRCUIT_TRACK) && win.YEONGAM_CIRCUIT_TRACK.length >= 25, 'KIC GP loop should have 18-turn high-density control points');
+  assert.ok(Array.isArray(win.YEONGAM_SHORT_CONNECTOR) && win.YEONGAM_SHORT_CONNECTOR.length >= 3, 'Permanent short connector must be defined');
+  assert.ok(Array.isArray(win.YEONGAM_PIT_LANE) && win.YEONGAM_PIT_LANE.length >= 4, 'Pit lane must be defined');
+  assert.ok(Array.isArray(win.YEONGAM_KART_TRACK) && win.YEONGAM_KART_TRACK.length >= 8, 'CIK-FIA multi-hairpin karting loop must be defined');
+  assert.equal(win.YEONGAM_PRESETS.length, 9);
+
+  // Closed GP loop invariant & land polygon inclusion
+  const firstPt = win.YEONGAM_CIRCUIT_TRACK[0];
+  const lastPt = win.YEONGAM_CIRCUIT_TRACK[win.YEONGAM_CIRCUIT_TRACK.length - 1];
+  assert.deepEqual(firstPt, lastPt, 'YEONGAM_CIRCUIT_TRACK must form a closed loop');
+  for (const [lat, lng] of win.YEONGAM_CIRCUIT_TRACK) {
+    assert.equal(win.inYeongamLand(lng, lat), true, `Track point (${lat}, ${lng}) must sit inside Samho peninsula land`);
+  }
+
+  // Jordan curve invariant: non-adjacent segments of the closed 18-turn GP loop must never self-intersect
+  const gpPts: [number, number][] = win.YEONGAM_CIRCUIT_TRACK;
+  const segCount = gpPts.length - 1;
+  const ccw = (a: [number, number], b: [number, number], c: [number, number]) =>
+    (c[1] - a[1]) * (b[0] - a[0]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const segmentsIntersect = (p1: [number, number], p2: [number, number], p3: [number, number], p4: [number, number]) => {
+    const d1 = ccw(p3, p4, p1);
+    const d2 = ccw(p3, p4, p2);
+    const d3 = ccw(p1, p2, p3);
+    const d4 = ccw(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  };
+  for (let i = 0; i < segCount; i++) {
+    for (let j = i + 2; j < segCount; j++) {
+      if (i === 0 && j === segCount - 1) continue; // adjacent across closure
+      assert.equal(
+        segmentsIntersect(gpPts[i], gpPts[i + 1], gpPts[j], gpPts[j + 1]),
+        false,
+        `GP loop segments ${i} and ${j} must not self-intersect`
+      );
+    }
+  }
+
+  for (const preset of win.YEONGAM_PRESETS) {
+    assert.ok(preset.lat >= REGIONS.yeongam.bounds.south && preset.lat <= REGIONS.yeongam.bounds.north);
+    assert.ok(preset.lng >= REGIONS.yeongam.bounds.west && preset.lng <= REGIONS.yeongam.bounds.east);
+  }
+
   const input = {
     markers: [
-      { id: 'kic_grandstand', name: 'KIC 메인 그랜드스탠드', category: '서킷·관람석', lat: 34.7376, lng: 126.4152 },
-      { id: 'kic_marina', name: 'KIC 마리나 워터프론트 코너', category: '레이싱 코스', lat: 34.7310, lng: 126.4222 },
-      { id: 'yeongsanho_bay', name: '은적산·영암호 전망능선', category: '자연·전망', lat: 34.7520, lng: 126.4765 },
+      { id: 'kic_grandstand', name: 'KIC 메인 그랜드스탠드 · 한옥육교', category: '서킷·상징건축', lat: 34.7376, lng: 126.4152 },
+      { id: 'kic_marina', name: 'KIC 마리나 워터프론트 코너 (T11~13)', category: '하버 레이싱구간', lat: 34.7310, lng: 126.4222 },
+      { id: 'yeongsanho_bay', name: '은적산 · 월출산 전망능선', category: '화강암 명산조망', lat: 34.7520, lng: 126.4765 },
       { id: 'hallasan', name: '한라산', category: '제주', lat: 33.3617, lng: 126.5292 }
     ],
     selectedId: 'kic_grandstand',
@@ -583,7 +632,7 @@ test('cleanState, share URL params, and TerrainOptimizer support Yeongam KIC spo
 
   const url = buildShareUrl('/', {
     region: 'yeongam',
-    camera: { pos: [-28.5, 42.0, 56.0], target: [-18.0, -11.0, 2.0] },
+    camera: { pos: [-45.5, 23.5, 44.5], target: [-16.5, 0.35, 9.2] },
     selectedId: 'kic_grandstand',
     elevationProfileOpen: true
   });
@@ -949,3 +998,89 @@ test('TerrainOptimizer generates watertight adaptive quadtree mesh for Incheon a
     }
   }
 });
+
+test('cleanState, share URLs, PlaceSearchHelpers, and TerrainOptimizer support Chungju Dam & Danyang 8 Views (danyang)', () => {
+  const input = {
+    markers: [
+      { id: 'chungju_dam', name: '충주댐 · 물문화관 전망대', category: '다목적댐·충주호', lat: 37.0038, lng: 127.9945 },
+      { id: 'gudam_oksun', name: '구담봉 · 옥순봉 · 옥순대교', category: '단양팔경 제3·4경', lat: 36.9408, lng: 128.2255 },
+      { id: 'dodamsambong', name: '도담삼봉 · 석문 (제1·2경)', category: '단양팔경 대표명소', lat: 36.9916, lng: 128.3432 },
+      { id: 'hallasan', name: '한라산', category: '제주', lat: 33.3617, lng: 126.5292 }
+    ],
+    selectedId: 'dodamsambong',
+    mapStyle: 'natural',
+    heightScale: 100
+  };
+  const cleaned = cleanState(input, REGIONS.danyang.bounds);
+  assert.equal(cleaned.markers.length, 3);
+  assert.equal(cleaned.selectedId, 'dodamsambong');
+
+  // Verify coordinate matching resolves Dodamsambong and Chungju Dam to danyang
+  assert.equal(PlaceSearchHelpers.findMatchingRegionId(36.9916, 128.3432, REGIONS), 'danyang');
+  assert.equal(PlaceSearchHelpers.findMatchingRegionId(37.0016, 127.9926, REGIONS), 'danyang');
+  assert.ok(PlaceSearchHelpers.DEFAULT_REGION_CENTERS.danyang);
+
+  const shareUrl = buildShareUrl('/', {
+    region: 'danyang',
+    camera: { pos: [-14.0, 46.0, 78.0], target: [2.0, -5.5, -2.0] },
+    selectedId: 'chungju_dam',
+    climateOverlayOpen: true
+  });
+  const decoded = parseShareParams(new URL(shareUrl).search);
+  assert.equal(decoded.region, 'danyang');
+  assert.equal(decoded.selectedId, 'chungju_dam');
+  assert.equal(decoded.climateOverlayOpen, true);
+
+  const bounds = REGIONS.danyang.bounds;
+  function sampleDanyangMeters(lat: number, lng: number) {
+    if (lng < 127.950 || lng > 128.490 || lat < 36.844 || lat > 37.056) return 0;
+    // Chungjuho / Namhangang corridor
+    const inChannel = Math.abs(lat - (36.985 + Math.sin((lng - 128.0) * 14) * 0.02)) < 0.012;
+    if (inChannel) {
+      return lng < 127.9926 ? 66.0 : 141.0;
+    }
+    const dSobaek = Math.hypot((lng - 128.465) / 0.055, (lat - 36.9575) / 0.055);
+    const dWorak = Math.hypot((lng - 128.106) / 0.048, (lat - 36.8865) / 0.042);
+    return 210 + 1229 * Math.exp(-(dSobaek * dSobaek) * 1.6) + 887 * Math.exp(-(dWorak * dWorak) * 1.8);
+  }
+
+  const adaptive = TerrainOptimizer.buildOptimizedTerrainGeometry({
+    mapWidth: 112,
+    mapDepth: 62,
+    bounds,
+    sampleHeightMeters: sampleDanyangMeters,
+    regionId: 'danyang',
+    quality: 'adaptive'
+  });
+
+  assert.equal(adaptive.stats.cols, 384);
+  assert.equal(adaptive.stats.rows, 256);
+  assert.ok(adaptive.stats.triangleCount < adaptive.stats.uniformTriangles);
+  assert.ok(adaptive.stats.reductionRatio > 0.25, `expected >25% reduction for danyang, got ${(adaptive.stats.reductionRatio * 100).toFixed(1)}%`);
+
+  const { uvs, indices } = adaptive;
+  const edgeCounts = new Map<string, number>();
+  for (let t = 0; t < indices.length; t += 3) {
+    const i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2];
+    for (const [a, b] of [[i0, i1], [i1, i2], [i2, i0]] as [number, number][]) {
+      const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    }
+  }
+  for (const [key, count] of edgeCounts.entries()) {
+    assert.ok(count === 1 || count === 2, `Non-manifold danyang edge ${key} has count ${count}`);
+    if (count === 1) {
+      const [a, b] = key.split('_').map(Number);
+      const ua = uvs[a * 2], va = uvs[a * 2 + 1];
+      const ub = uvs[b * 2], vb = uvs[b * 2 + 1];
+      const eps = 1e-6;
+      const onOuter =
+        (Math.abs(ua) < eps && Math.abs(ub) < eps) ||
+        (Math.abs(ua - 1) < eps && Math.abs(ub - 1) < eps) ||
+        (Math.abs(va) < eps && Math.abs(vb) < eps) ||
+        (Math.abs(va - 1) < eps && Math.abs(vb - 1) < eps);
+      assert.ok(onOuter, `Interior T-junction crack on danyang edge ${key}`);
+    }
+  }
+});
+

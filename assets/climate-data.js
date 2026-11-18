@@ -110,6 +110,27 @@
         { month: 11, label: '11월', avgTempC: 10.2, minTempC: 6.1, maxTempC: 14.9, precipMm: 46.8, sunshineHrs: 168, humidityPct: 68, seaTempC: 14.6, windMs: 3.5 },
         { month: 12, label: '12월', avgTempC: 4.1, minTempC: 0.6, maxTempC: 8.3, precipMm: 31.2, sunshineHrs: 152, humidityPct: 68, seaTempC: 9.8, windMs: 4.0 }
       ]
+    },
+    danyang: {
+      regionId: 'danyang',
+      stationName: '충주·단양 호반 (기상청 127)',
+      climateType: '중부 내륙 분지·호반 대륙성 기후',
+      bestSeason: '4–5월 · 10–11월 (단풍·호반 유람)',
+      note: '소백산·월악산에 둘러싸인 내륙 호반 지형으로 연교차가 뚜렷하며, 가을 단풍철 충주호·단양강 물안개와 청명한 일조가 장관을 이룹니다.',
+      monthly: [
+        { month: 1, label: '1월', avgTempC: -3.6, minTempC: -8.9, maxTempC: 1.8, precipMm: 21.2, sunshineHrs: 168, humidityPct: 67, seaTempC: 3.8, windMs: 1.6 },
+        { month: 2, label: '2월', avgTempC: -0.7, minTempC: -6.3, maxTempC: 5.2, precipMm: 29.4, sunshineHrs: 176, humidityPct: 63, seaTempC: 3.6, windMs: 1.8 },
+        { month: 3, label: '3월', avgTempC: 5.3, minTempC: -0.7, maxTempC: 11.7, precipMm: 41.6, sunshineHrs: 206, humidityPct: 60, seaTempC: 6.4, windMs: 2.0 },
+        { month: 4, label: '4월', avgTempC: 12.1, minTempC: 5.3, maxTempC: 19.1, precipMm: 76.5, sunshineHrs: 218, humidityPct: 58, seaTempC: 11.2, windMs: 2.1 },
+        { month: 5, label: '5월', avgTempC: 17.8, minTempC: 11.2, maxTempC: 24.5, precipMm: 89.2, sunshineHrs: 236, humidityPct: 63, seaTempC: 16.4, windMs: 1.9 },
+        { month: 6, label: '6월', avgTempC: 22.2, minTempC: 16.6, maxTempC: 28.0, precipMm: 136.8, sunshineHrs: 202, humidityPct: 70, seaTempC: 20.8, windMs: 1.7 },
+        { month: 7, label: '7월', avgTempC: 24.9, minTempC: 20.9, maxTempC: 29.3, precipMm: 298.5, sunshineHrs: 148, humidityPct: 80, seaTempC: 23.9, windMs: 1.6 },
+        { month: 8, label: '8월', avgTempC: 25.4, minTempC: 21.2, maxTempC: 30.1, precipMm: 278.4, sunshineHrs: 172, humidityPct: 79, seaTempC: 25.4, windMs: 1.6 },
+        { month: 9, label: '9월', avgTempC: 19.8, minTempC: 14.7, maxTempC: 25.6, precipMm: 138.2, sunshineHrs: 180, humidityPct: 76, seaTempC: 21.8, windMs: 1.4 },
+        { month: 10, label: '10월', avgTempC: 12.9, minTempC: 7.1, maxTempC: 19.6, precipMm: 48.6, sunshineHrs: 202, humidityPct: 72, seaTempC: 16.8, windMs: 1.4 },
+        { month: 11, label: '11월', avgTempC: 5.7, minTempC: 0.6, maxTempC: 11.6, precipMm: 41.2, sunshineHrs: 156, humidityPct: 70, seaTempC: 11.2, windMs: 1.5 },
+        { month: 12, label: '12월', avgTempC: -1.4, minTempC: -6.4, maxTempC: 3.9, precipMm: 22.8, sunshineHrs: 158, humidityPct: 69, seaTempC: 6.1, windMs: 1.6 }
+      ]
     }
   };
 
