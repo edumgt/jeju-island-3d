@@ -615,6 +615,25 @@ test('cleanState, share URL params, yeongam-data track geometry, and TerrainOpti
     assert.ok(preset.lng >= REGIONS.yeongam.bounds.west && preset.lng <= REGIONS.yeongam.bounds.east);
   }
 
+  // Yeongam F1 Circuit Info-Card structured data contract
+  const info = win.YEONGAM_CIRCUIT_INFO;
+  assert.ok(info, 'YEONGAM_CIRCUIT_INFO must be exported for the Yeongam info-card');
+  assert.equal(info.lengthKm, 5.615);
+  assert.equal(info.permanentLengthKm, 3.045);
+  assert.equal(info.turns, 18);
+  assert.equal(info.leftTurns + info.rightTurns, 18);
+  assert.equal(info.lapRecord.time, '1:39.605');
+  assert.equal(info.stats.length, 6);
+  assert.equal(info.sectors.length, 3);
+  for (const sector of info.sectors) {
+    assert.equal(win.inYeongamLand(sector.lng, sector.lat), true, `Circuit sector ${sector.id} must sit inside Samho peninsula`);
+  }
+  assert.ok(info.history && info.history.summary.length > 40);
+  assert.equal(info.history.highlights.length, 3);
+  assert.equal(info.history.winners.length, 4);
+  assert.equal(info.history.winners[0].year, 2010);
+  assert.equal(info.history.winners[3].year, 2013);
+
   const input = {
     markers: [
       { id: 'kic_grandstand', name: 'KIC 메인 그랜드스탠드 · 한옥육교', category: '서킷·상징건축', lat: 34.7376, lng: 126.4152 },

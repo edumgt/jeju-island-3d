@@ -415,6 +415,55 @@
         <div id="loading" class="loading" role="status"><span class="loading-spinner"></span><strong id="loading-title">3D 지도를 불러오는 중</strong><small id="loading-sub">실제 해안선과 지형을 준비하고 있어요.</small></div>
 
         <div class="viewer-title"><span class="viewer-kicker">INTERACTIVE 3D MAP <span class="live-dot"></span> LIVE</span><strong id="viewer-region-name">Jeju Island</strong><span id="viewer-region-coord">대한민국 · 북위 33.38°</span></div>
+
+        <!-- Yeongam F1 Korea International Circuit Info Card (visible when Yeongam region is selected) -->
+        <aside id="circuit-info-card" class="circuit-info-card" aria-label="영암 코리아 인터내셔널 서킷 정보 카드" data-tab="specs" hidden>
+          <div class="circuit-card-head">
+            <div class="circuit-card-heading">
+              <div id="circuit-card-kicker" class="circuit-card-kicker">FIA Grade 1 · 5.615 km · 18 Turns</div>
+              <h2 id="circuit-card-title" class="circuit-card-title">코리아 인터내셔널 서킷</h2>
+            </div>
+            <button type="button" id="circuit-card-toggle" class="circuit-card-toggle" aria-expanded="true" aria-controls="circuit-card-body" title="서킷 정보 카드 접기/펼치기">접기</button>
+          </div>
+
+          <div id="circuit-card-body" class="circuit-card-body">
+            <div class="circuit-card-tabs" role="tablist" aria-label="서킷 정보 보기 전환">
+              <button type="button" class="circuit-tab-btn is-active" id="circuit-tab-specs" role="tab" aria-selected="true" aria-controls="circuit-panel-specs" data-circuit-tab="specs">트랙 제원</button>
+              <button type="button" class="circuit-tab-btn" id="circuit-tab-history" role="tab" aria-selected="false" aria-controls="circuit-panel-history" data-circuit-tab="history">역사 · F1 기록</button>
+            </div>
+
+            <div id="circuit-panel-specs" class="circuit-tab-panel" role="tabpanel" aria-labelledby="circuit-tab-specs">
+              <div class="circuit-diagram-row">
+                <svg id="circuit-mini-svg" class="circuit-mini-svg" viewBox="0 0 180 96" role="img" aria-label="코리아 인터내셔널 서킷 18코너 트랙 레이아웃"></svg>
+                <div class="circuit-diagram-meta">
+                  <div class="circuit-meta-line"><span>설계</span><strong id="circuit-meta-designer">Hermann Tilke</strong></div>
+                  <div class="circuit-meta-line"><span>방향</span><strong id="circuit-meta-direction">반시계 방향 (CCW)</strong></div>
+                  <div class="circuit-meta-line"><span>F1 개최</span><strong id="circuit-meta-era">2010–2013 (4회)</strong></div>
+                </div>
+              </div>
+
+              <dl id="circuit-stats-grid" class="circuit-stats-grid"></dl>
+
+              <div class="circuit-sectors-block">
+                <div class="circuit-sectors-head">
+                  <span class="circuit-sectors-label">주요 구간 바로 보기</span>
+                  <span id="circuit-sector-note" class="circuit-sector-note">구간 클릭 시 3D 카메라 이동</span>
+                </div>
+                <div id="circuit-sectors-row" class="circuit-sectors-row"></div>
+              </div>
+            </div>
+
+            <div id="circuit-panel-history" class="circuit-tab-panel" role="tabpanel" aria-labelledby="circuit-tab-history" hidden>
+              <p id="circuit-history-summary" class="circuit-history-summary"></p>
+              <ol id="circuit-history-list" class="circuit-history-list"></ol>
+              <div class="circuit-winners-block">
+                <span class="circuit-winners-label">F1 코리아 그랑프리 역대 우승자</span>
+                <div id="circuit-winners-list" class="circuit-winners-list"></div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
         <div class="viewer-tip">마우스로 돌리고 확대해 보세요 <span aria-hidden="true">↗</span></div>
         <div id="pick-instruction" class="pick-instruction" hidden><span id="pick-instruction-text">섬 또는 육지 위의 원하는 위치를 클릭하세요.</span> <button id="cancel-pick" type="button">취소</button></div>
         <div id="transect-instruction" class="pick-instruction transect-instruction" hidden><span id="transect-instruction-text">3D 지형 위를 드래그해 단면 경로를 그리세요 · 실시간 측정</span> <button id="cancel-transect-draw" type="button">완료</button></div>

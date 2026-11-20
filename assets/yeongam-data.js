@@ -936,6 +936,98 @@
     };
   }
 
+  const YEONGAM_CIRCUIT_INFO = {
+    id: 'kic-yeongam',
+    nameEn: 'Korea International Circuit',
+    nameKo: '영암 코리아 인터내셔널 서킷',
+    location: '전남 영암군 삼호읍',
+    grade: 'FIA Grade 1',
+    designer: 'Hermann Tilke',
+    direction: '반시계 방향 (CCW)',
+    openedYear: 2010,
+    f1Era: '2010–2013 F1 Korean GP',
+    lengthKm: 5.615,
+    permanentLengthKm: 3.045,
+    turns: 18,
+    leftTurns: 11,
+    rightTurns: 7,
+    longestStraightKm: 1.2,
+    topSpeedKmh: 320,
+    raceLaps: 55,
+    raceDistanceKm: 308.63,
+    capacity: 135000,
+    mainGrandstandSeats: 16000,
+    lapRecord: {
+      time: '1:39.605',
+      driver: 'Sebastian Vettel',
+      team: 'Red Bull-Renault',
+      year: 2011
+    },
+    stats: [
+      { key: 'length', label: 'GP 총연장', value: '5.615 km', detail: '상설 코스 3.045 km' },
+      { key: 'turns', label: '코너 구성', value: '18 Turns', detail: '좌 11 · 우 7 (CCW)' },
+      { key: 'straight', label: '최장 직선', value: '1.20 km', detail: '최고 약 320 km/h' },
+      { key: 'record', label: 'F1 랩 레코드', value: '1:39.605', detail: 'S. Vettel · 2011' },
+      { key: 'distance', label: 'F1 레이스', value: '308.63 km', detail: '총 55 랩 주행' },
+      { key: 'capacity', label: '관람 수용', value: '135,000석', detail: '메인 스탠드 16,000석' }
+    ],
+    sectors: [
+      {
+        id: 's1',
+        code: 'S1',
+        label: '메인·한옥육교',
+        markerId: 'kic_grandstand',
+        lat: 34.7374,
+        lng: 126.4152,
+        note: '스타팅 그리드 · 한옥 팔작지붕 육교 · T1–T2'
+      },
+      {
+        id: 's2',
+        code: 'S2',
+        label: '1.2km·T3 헤어핀',
+        markerId: 'kic_turn3',
+        lat: 34.7426,
+        lng: 126.4044,
+        note: '시속 320km 직선 끝 최대 추월 브레이킹 존'
+      },
+      {
+        id: 's3',
+        code: 'S3',
+        label: '영암호 마리나',
+        markerId: 'kic_marina',
+        lat: 34.7310,
+        lng: 126.4222,
+        note: '영암호 요트 방파제를 스치는 T11–T14 구간'
+      }
+    ],
+    history: {
+      summary: '2010년 대한민국 최초로 FIA 포뮬러 1 월드 챔피언십을 유치한 국제 1등급 서킷으로, 서킷 거장 헤르만 틸케가 영암호 간척지 지형 위에 고속 직선과 항만 수변 코너를 결합해 설계했습니다.',
+      highlights: [
+        {
+          period: '2010–2013',
+          title: '대한민국 최초 F1 코리아 그랑프리 4회 개최',
+          body: '2010년 폭우 속 개막전에서 페르난도 알론소(페라리)가 초대 우승을 거뒀고, 2011~2013년 세바스찬 베텔(레드불)이 3연승을 기록했습니다.'
+        },
+        {
+          period: 'Architecture',
+          title: '한국 전통 한옥 육교와 하이브리드 트랙 구조',
+          body: '트랙 상공을 가로지르는 팔작지붕 한옥 보도육교가 상징이며, F1 풀코스(5.615km)와 국내 대회용 상설 코스(3.045km)로 분리 운영됩니다.'
+        },
+        {
+          period: 'Legacy',
+          title: '국내 최대 국제 공인 모터스포츠 거점',
+          body: '현재도 슈퍼레이스 챔피언십, 아시아 르망 시리즈, GT 내구레이스 및 카트 대회가 열리는 한국 모터스포츠의 중심 무대입니다.'
+        }
+      ],
+      winners: [
+        { year: 2010, driver: 'F. Alonso', team: 'Ferrari' },
+        { year: 2011, driver: 'S. Vettel', team: 'Red Bull' },
+        { year: 2012, driver: 'S. Vettel', team: 'Red Bull' },
+        { year: 2013, driver: 'S. Vettel', team: 'Red Bull' }
+      ]
+    }
+  };
+
   window.YEONGAM_BOUNDS = BOUNDS;
   window.YEONGAM_OUTLINE = YEONGAM_OUTLINE;
   window.YEONGAM_ROADS = YEONGAM_ROADS;
@@ -944,6 +1036,7 @@
   window.YEONGAM_PIT_LANE = KIC_PIT_LANE;
   window.YEONGAM_KART_TRACK = KIC_KART_TRACK;
   window.YEONGAM_PRESETS = YEONGAM_PRESETS;
+  window.YEONGAM_CIRCUIT_INFO = YEONGAM_CIRCUIT_INFO;
   window.inYeongamLand = inYeongamLand;
   window.createYeongamAssets = createYeongamAssets;
 })();

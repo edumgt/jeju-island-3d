@@ -1367,3 +1367,430 @@ body.is-night-sky .viewer-tip { color: #cbd5e1; }
   line-height: 1.4;
 }
 
+/* Yeongam F1 Korea International Circuit Info Card */
+.circuit-info-card {
+  position: absolute;
+  top: 126px;
+  left: 35px;
+  z-index: 5;
+  width: 326px;
+  max-height: calc(100% - 252px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(203, 213, 225, 0.85);
+  border-top: 2px solid #c81e1e;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.11);
+  color: #17243a;
+  overflow: hidden;
+  transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.circuit-info-card.is-collapsed {
+  width: 286px;
+}
+.circuit-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  flex: none;
+}
+.circuit-card-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.circuit-card-kicker {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #b91c1c;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.circuit-card-title {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 1.25;
+  letter-spacing: -0.03em;
+  font-weight: 800;
+  color: #0f172a;
+}
+.circuit-card-toggle {
+  flex: none;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid #dbe2ea;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.circuit-card-toggle:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+.circuit-card-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+.circuit-card-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px 16px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  flex: none;
+}
+.circuit-tab-btn {
+  position: relative;
+  min-height: 32px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 4px 4px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.circuit-tab-btn:hover {
+  color: #0f172a;
+}
+.circuit-tab-btn.is-active {
+  color: #b91c1c;
+  border-bottom-color: #c81e1e;
+}
+.circuit-tab-panel {
+  padding: 13px 16px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.circuit-diagram-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+.circuit-mini-svg {
+  width: 132px;
+  height: 70px;
+  flex: none;
+  display: block;
+}
+.circuit-diagram-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.circuit-meta-line {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.circuit-meta-line span {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #64748b;
+}
+.circuit-meta-line strong {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.circuit-stats-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+.circuit-stat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.circuit-stat-cell dt {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+}
+.circuit-stat-cell dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.circuit-stat-value {
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.circuit-stat-detail {
+  font-size: 10px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.circuit-sectors-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.circuit-sectors-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.circuit-sectors-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #334155;
+  white-space: nowrap;
+}
+.circuit-sector-note {
+  font-size: 10px;
+  color: #64748b;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.circuit-sectors-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.circuit-sector-btn {
+  min-height: 34px;
+  padding: 6px 6px;
+  border: 1px solid #dbe3ec;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #1e293b;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.circuit-sector-btn:hover,
+.circuit-sector-btn.is-active {
+  background: #fef2f2;
+  border-color: #f87171;
+  color: #991b1b;
+}
+.circuit-sector-code {
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #c81e1e;
+  font-variant-numeric: tabular-nums;
+}
+.circuit-sector-name {
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* History & F1 Records Tab */
+.circuit-history-summary {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.58;
+  color: #334155;
+  word-break: keep-all;
+}
+.circuit-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  padding-top: 10px;
+}
+.circuit-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.circuit-history-period {
+  font-size: 10px;
+  font-weight: 800;
+  color: #b91c1c;
+  font-variant-numeric: tabular-nums;
+}
+.circuit-history-item strong {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.35;
+}
+.circuit-history-item p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #475569;
+  word-break: keep-all;
+}
+.circuit-winners-block {
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.circuit-winners-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #334155;
+}
+.circuit-winners-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 10px;
+}
+.circuit-winner-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.circuit-winner-year {
+  font-weight: 800;
+  color: #b91c1c;
+}
+.circuit-winner-driver {
+  font-weight: 700;
+  color: #0f172a;
+}
+.circuit-winner-team {
+  color: #64748b;
+  font-size: 10px;
+}
+
+/* Night-sky optical compensation */
+body.is-night-sky .circuit-info-card {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.28);
+  border-top-color: #ef4444;
+  color: #f1f5f9;
+  box-shadow: 0 14px 36px rgba(2, 6, 23, 0.45);
+}
+body.is-night-sky .circuit-card-title,
+body.is-night-sky .circuit-meta-line strong,
+body.is-night-sky .circuit-stat-value,
+body.is-night-sky .circuit-history-item strong,
+body.is-night-sky .circuit-winner-driver {
+  color: #f8fafc;
+}
+body.is-night-sky .circuit-card-kicker,
+body.is-night-sky .circuit-tab-btn.is-active,
+body.is-night-sky .circuit-sector-code,
+body.is-night-sky .circuit-history-period,
+body.is-night-sky .circuit-winner-year {
+  color: #f87171;
+}
+body.is-night-sky .circuit-meta-line span,
+body.is-night-sky .circuit-stat-cell dt,
+body.is-night-sky .circuit-stat-detail,
+body.is-night-sky .circuit-sector-note,
+body.is-night-sky .circuit-tab-btn,
+body.is-night-sky .circuit-winner-team {
+  color: #94a3b8;
+}
+body.is-night-sky .circuit-history-summary,
+body.is-night-sky .circuit-history-item p,
+body.is-night-sky .circuit-sectors-label,
+body.is-night-sky .circuit-winners-label {
+  color: #cbd5e1;
+}
+body.is-night-sky .circuit-card-body,
+body.is-night-sky .circuit-card-tabs,
+body.is-night-sky .circuit-diagram-row,
+body.is-night-sky .circuit-stats-grid,
+body.is-night-sky .circuit-history-list,
+body.is-night-sky .circuit-winners-block {
+  border-color: rgba(148, 163, 184, 0.18);
+}
+body.is-night-sky .circuit-card-toggle,
+body.is-night-sky .circuit-sector-btn {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #e2e8f0;
+}
+body.is-night-sky .circuit-card-toggle:hover,
+body.is-night-sky .circuit-sector-btn:hover,
+body.is-night-sky .circuit-sector-btn.is-active {
+  background: rgba(127, 29, 29, 0.45);
+  border-color: rgba(248, 113, 113, 0.65);
+  color: #fecaca;
+}
+
+@media (max-width: 960px) {
+  .circuit-info-card {
+    top: 112px;
+    left: 16px;
+    width: 296px;
+  }
+}
+@media (max-width: 760px) {
+  .circuit-info-card {
+    top: 94px;
+    left: 12px;
+    width: min(300px, calc(100% - 76px));
+    max-height: calc(100% - 196px);
+  }
+  .circuit-card-head {
+    padding: 10px 12px;
+  }
+  .circuit-card-toggle {
+    min-height: 32px;
+  }
+}
+
+

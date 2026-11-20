@@ -470,6 +470,7 @@
   let yeongamTrackCurve = null;
   let yeongamAnimCars = [];
   let yeongamEmissiveMaterials = [];
+  let yeongamCircuitTextures = [];
   let danyangLandmarksGroup = null;
   let danyangWaterAccentsGroup = null;
   let regionalEmissiveMaterials = [];
@@ -1280,6 +1281,7 @@
       btn.classList.toggle('is-active', btn.dataset.climateMode === state.climateChartMode);
     });
     if (state.climateOverlayOpen) updateClimateOverlay();
+    syncCircuitInfoCard();
 
     const cache = regionCaches[currentRegionId];
     if (terrain && cache && cache.textures) {
@@ -1733,6 +1735,7 @@
       setView('perspective');
       showToast('드론 비행을 종료했어요.');
     }
+    syncCircuitInfoCard();
   }
 
   function updateDroneFlight(delta) {
@@ -1855,6 +1858,256 @@
     const revPickStatus = $('#reverse-pick-status');
     if (revPickStatus) revPickStatus.hidden = true;
     clearLiveSearch();
+    syncCircuitInfoCard();
+  }
+
+  let circuitCardPopulated = false;
+  let circuitCardCollapsed = typeof window !== 'undefined' ? window.innerWidth <= 760 : false;
+  let circuitCardTab = 'specs';
+  let activeCircuitSectorId = null;
+
+  function renderYeongamCircuitMiniSvg(svgEl) {
+    if (!svgEl) return;
+    const pts = window.YEONGAM_CIRCUIT_TRACK;
+    if (!Array.isArray(pts) || pts.length < 4) return;
+
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    for (const [lat, lng] of pts) {
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+    }
+    const padX = 14;
+    const padY = 12;
+    const w = 180;
+    const h = 96;
+    const spanLng = Math.max(0.0001, (maxLng - minLng) * Math.cos(34.737 * Math.PI / 180));
+    const spanLat = Math.max(0.0001, maxLat - minLat);
+    const scale = Math.min((w - padX * 2) / spanLng, (h - padY * 2) / spanLat);
+    const drawnW = spanLng * scale;
+    const drawnH = spanLat * scale;
+    const offX = (w - drawnW) * 0.5;
+    const offY = (h - drawnH) * 0.5;
+
+    const project = ([lat, lng]) => [
+      offX + (lng - minLng) * Math.cos(34.737 * Math.PI / 180) * scale,
+      offY + (maxLat - lat) * scale
+    ];
+
+    const gpPath = pts
+      .map((p, idx) => {
+        const [x, y] = project(p);
+        return `${idx === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ') + ' Z';
+
+    const shortPts = Array.isArray(window.YEONGAM_SHORT_CONNECTOR) ? window.YEONGAM_SHORT_CONNECTOR : [];
+    const shortPath = shortPts.length >= 2
+      ? shortPts
+          .map((p, idx) => {
+            const [x, y] = project(p);
+            return `${idx === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(' ')
+      : '';
+
+    const [sfX, sfY] = project(pts[1]);
+    const [t3X, t3Y] = project([34.7427, 126.4042]);
+    const [marX, marY] = project([34.7310, 126.4222]);
+
+    svgEl.innerHTML = [
+      shortPath
+        ? `<path d="${shortPath}" fill="none" stroke="rgba(100,116,139,0.55)" stroke-width="2" stroke-dasharray="3 2.5" stroke-linecap="round"/>`
+        : '',
+      `<path d="${gpPath}" fill="none" stroke="rgba(15,23,42,0.16)" stroke-width="6.5" stroke-linejoin="round" stroke-linecap="round"/>`,
+      `<path d="${gpPath}" fill="none" stroke="#c81e1e" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/>`,
+      `<circle cx="${sfX.toFixed(1)}" cy="${sfY.toFixed(1)}" r="3.6" fill="#0f172a" stroke="#ffffff" stroke-width="1.4"/>`,
+      `<circle cx="${t3X.toFixed(1)}" cy="${t3Y.toFixed(1)}" r="2.4" fill="#1769c1"/>`,
+      `<circle cx="${marX.toFixed(1)}" cy="${marY.toFixed(1)}" r="2.4" fill="#0d9488"/>`,
+      `<text x="${(sfX + 5).toFixed(1)}" y="${(sfY + 10).toFixed(1)}" font-size="7.5" font-weight="800" fill="#475569">S/F</text>`,
+      `<text x="${(t3X - 5).toFixed(1)}" y="${(t3Y - 5).toFixed(1)}" font-size="7" font-weight="800" fill="#1769c1">T3</text>`,
+      `<text x="${(marX - 20).toFixed(1)}" y="${(marY + 11).toFixed(1)}" font-size="7" font-weight="800" fill="#0d9488">MARINA</text>`
+    ].join('');
+  }
+
+  function focusCircuitSector(sector) {
+    if (!sector || currentRegionId !== 'yeongam' || !camera || !controls) return;
+    activeCircuitSectorId = sector.id;
+    const noteEl = $('#circuit-sector-note');
+    if (noteEl && sector.note) noteEl.textContent = sector.note;
+    document.querySelectorAll('.circuit-sector-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.sectorId === sector.id);
+    });
+
+    if (sector.markerId && markerById(sector.markerId)) {
+      focusOnMarker(sector.markerId);
+      return;
+    }
+    if (droneMode) setDroneMode(false);
+    viewMode = 'perspective';
+    camera.up.set(0, 1, 0);
+    const { x, z } = worldPosition(sector.lat, sector.lng);
+    const y = surfaceHeight(sector.lat, sector.lng);
+    const offsets = {
+      kic_grandstand: [-6.4, 4.1, 5.8],
+      kic_turn3: [-5.4, 3.9, 4.8],
+      kic_marina: [-7.2, 4.6, 7.6]
+    };
+    const [dx, dy, dz] = offsets[sector.markerId] || [-5.8, 4.2, 5.6];
+    const camX = x + dx;
+    const camZ = z + dz;
+    const camGroundY = surfaceHeightAtWorld(camX, camZ);
+    const safeCamY = Math.max(y + dy, camGroundY + 2.5);
+    cameraFlyTarget = {
+      target: new THREE.Vector3(x, y + 0.42, z),
+      pos: new THREE.Vector3(camX, safeCamY, camZ)
+    };
+    document.querySelectorAll('[data-action="perspective"], [data-action="top"]').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.action === 'perspective');
+    });
+  }
+
+  function populateYeongamCircuitInfoCard() {
+    if (circuitCardPopulated) return;
+    const info = window.YEONGAM_CIRCUIT_INFO;
+    if (!info) return;
+
+    const kickerEl = $('#circuit-card-kicker');
+    if (kickerEl) kickerEl.textContent = `${info.grade} · ${info.lengthKm.toFixed(3)} km · ${info.turns} Turns`;
+    const titleEl = $('#circuit-card-title');
+    if (titleEl) titleEl.textContent = info.nameKo;
+    const designerEl = $('#circuit-meta-designer');
+    if (designerEl) designerEl.textContent = info.designer;
+    const dirEl = $('#circuit-meta-direction');
+    if (dirEl) dirEl.textContent = info.direction;
+    const eraEl = $('#circuit-meta-era');
+    if (eraEl) eraEl.textContent = '2010–2013 (4회 개최)';
+
+    renderYeongamCircuitMiniSvg($('#circuit-mini-svg'));
+
+    const statsGrid = $('#circuit-stats-grid');
+    if (statsGrid && Array.isArray(info.stats)) {
+      statsGrid.innerHTML = '';
+      for (const stat of info.stats) {
+        const cell = document.createElement('div');
+        cell.className = 'circuit-stat-cell';
+        const dt = document.createElement('dt');
+        dt.textContent = stat.label;
+        const dd = document.createElement('dd');
+        const val = document.createElement('span');
+        val.className = 'circuit-stat-value';
+        val.textContent = stat.value;
+        const detail = document.createElement('span');
+        detail.className = 'circuit-stat-detail';
+        detail.textContent = stat.detail;
+        dd.append(val, detail);
+        cell.append(dt, dd);
+        statsGrid.append(cell);
+      }
+    }
+
+    const sectorsRow = $('#circuit-sectors-row');
+    if (sectorsRow && Array.isArray(info.sectors)) {
+      sectorsRow.innerHTML = '';
+      for (const sector of info.sectors) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'circuit-sector-btn';
+        btn.dataset.sectorId = sector.id;
+        btn.title = sector.note;
+        const code = document.createElement('span');
+        code.className = 'circuit-sector-code';
+        code.textContent = sector.code;
+        const name = document.createElement('span');
+        name.className = 'circuit-sector-name';
+        name.textContent = sector.label;
+        btn.append(code, name);
+        btn.addEventListener('click', () => focusCircuitSector(sector));
+        sectorsRow.append(btn);
+      }
+    }
+
+    const historySummary = $('#circuit-history-summary');
+    if (historySummary && info.history) historySummary.textContent = info.history.summary;
+
+    const historyList = $('#circuit-history-list');
+    if (historyList && info.history && Array.isArray(info.history.highlights)) {
+      historyList.innerHTML = '';
+      for (const item of info.history.highlights) {
+        const li = document.createElement('li');
+        li.className = 'circuit-history-item';
+        const period = document.createElement('span');
+        period.className = 'circuit-history-period';
+        period.textContent = item.period;
+        const heading = document.createElement('strong');
+        heading.textContent = item.title;
+        const body = document.createElement('p');
+        body.textContent = item.body;
+        li.append(period, heading, body);
+        historyList.append(li);
+      }
+    }
+
+    const winnersList = $('#circuit-winners-list');
+    if (winnersList && info.history && Array.isArray(info.history.winners)) {
+      winnersList.innerHTML = '';
+      for (const w of info.history.winners) {
+        const row = document.createElement('div');
+        row.className = 'circuit-winner-row';
+        const yr = document.createElement('span');
+        yr.className = 'circuit-winner-year';
+        yr.textContent = String(w.year);
+        const drv = document.createElement('span');
+        drv.className = 'circuit-winner-driver';
+        drv.textContent = w.driver;
+        const tm = document.createElement('span');
+        tm.className = 'circuit-winner-team';
+        tm.textContent = w.team;
+        row.append(yr, drv, tm);
+        winnersList.append(row);
+      }
+    }
+
+    circuitCardPopulated = true;
+  }
+
+  function setCircuitInfoTab(tab) {
+    circuitCardTab = tab === 'history' ? 'history' : 'specs';
+    const card = $('#circuit-info-card');
+    if (card) card.dataset.tab = circuitCardTab;
+    document.querySelectorAll('.circuit-tab-btn').forEach((btn) => {
+      const active = btn.dataset.circuitTab === circuitCardTab;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+    const specsPanel = $('#circuit-panel-specs');
+    const historyPanel = $('#circuit-panel-history');
+    if (specsPanel) specsPanel.hidden = circuitCardTab !== 'specs';
+    if (historyPanel) historyPanel.hidden = circuitCardTab !== 'history';
+  }
+
+  function syncCircuitInfoCard() {
+    const card = $('#circuit-info-card');
+    if (!card) return;
+    const shouldShow =
+      currentRegionId === 'yeongam' &&
+      !droneMode &&
+      !state.elevationProfileOpen &&
+      !state.climateOverlayOpen;
+    card.hidden = !shouldShow;
+    if (!shouldShow) return;
+
+    populateYeongamCircuitInfoCard();
+    card.classList.toggle('is-collapsed', circuitCardCollapsed);
+    const body = $('#circuit-card-body');
+    if (body) body.hidden = circuitCardCollapsed;
+    const toggleBtn = $('#circuit-card-toggle');
+    if (toggleBtn) {
+      toggleBtn.setAttribute('aria-expanded', String(!circuitCardCollapsed));
+      toggleBtn.textContent = circuitCardCollapsed ? '펼치기' : '접기';
+    }
+    setCircuitInfoTab(circuitCardTab);
   }
 
   async function switchRegion(newRegionId) {
@@ -2399,6 +2652,21 @@
         }
       }
     });
+    const circuitToggle = $('#circuit-card-toggle');
+    if (circuitToggle) {
+      circuitToggle.addEventListener('click', () => {
+        circuitCardCollapsed = !circuitCardCollapsed;
+        syncCircuitInfoCard();
+      });
+    }
+    document.querySelectorAll('.circuit-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (circuitCardCollapsed) circuitCardCollapsed = false;
+        setCircuitInfoTab(btn.dataset.circuitTab);
+        syncCircuitInfoCard();
+      });
+    });
+
     applyRegionUI();
     renderState();
     setLnbOpen(false);
@@ -4358,6 +4626,10 @@
       disposeObject(yeongamCircuitGroup);
       yeongamCircuitGroup = null;
     }
+    if (yeongamCircuitTextures.length > 0) {
+      yeongamCircuitTextures.forEach((t) => t && t.dispose && t.dispose());
+      yeongamCircuitTextures = [];
+    }
     yeongamTrackCurve = null;
     yeongamAnimCars = [];
     yeongamEmissiveMaterials = [];
@@ -4374,7 +4646,293 @@
       return;
     }
 
-    // 1. Closed 3D Catmull-Rom racing line grounded seamlessly over 16-bit DEM
+    const maxAniso = renderer && renderer.capabilities ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 4;
+    function makeCanvasTex(width, height, drawFn, repeatX = 1, repeatY = 1) {
+      const c = document.createElement('canvas');
+      c.width = width;
+      c.height = height;
+      const ctx = c.getContext('2d');
+      drawFn(ctx, width, height);
+      const tex = new THREE.CanvasTexture(c);
+      if ('colorSpace' in tex && THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+      else if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+      tex.anisotropy = maxAniso;
+      if (repeatX !== 1 || repeatY !== 1) {
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(repeatX, repeatY);
+      }
+      tex.needsUpdate = true;
+      yeongamCircuitTextures.push(tex);
+      return tex;
+    }
+
+    // -------------------------------------------------------------------------
+    // 0. Procedural High-Resolution Motorsport Architectural Textures (Zero 404s)
+    // -------------------------------------------------------------------------
+    const seatingTex = makeCanvasTex(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#cfd8e3';
+      ctx.fillRect(0, 0, w, h);
+      const rows = 16;
+      const rowH = h / rows;
+      for (let r = 0; r < rows; r++) {
+        const y = r * rowH;
+        // Concrete step riser shadow
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(0, y, w, rowH * 0.28);
+        // Individual stadium seats in Taegeuk / KIC mosaic bands
+        const bandColor = r < 5 ? '#1d4ed8' : (r < 10 ? '#e2e8f0' : '#dc2626');
+        const accentColor = r < 5 ? '#2563eb' : (r < 10 ? '#cbd5e1' : '#b91c1c');
+        for (let col = 0; col < 32; col++) {
+          // Vertical concrete stair aisles
+          if (col === 7 || col === 8 || col === 23 || col === 24) {
+            ctx.fillStyle = '#cbd5e1';
+            ctx.fillRect(col * 8, y + rowH * 0.25, 8, rowH * 0.75);
+            ctx.fillStyle = '#facc15';
+            ctx.fillRect(col * 8, y + rowH * 0.85, 8, 1.5);
+            continue;
+          }
+          ctx.fillStyle = ((col + r * 3) % 5 === 0) ? accentColor : bandColor;
+          ctx.fillRect(col * 8 + 1, y + rowH * 0.30, 6, rowH * 0.60);
+        }
+      }
+    }, 3, 1);
+
+    const pitFacadeTex = makeCanvasTex(512, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#dde4ec';
+      ctx.fillRect(0, 0, w, h);
+      // Red/cobalt FIA header band
+      ctx.fillStyle = '#c81e1e';
+      ctx.fillRect(0, 0, w, 16);
+      ctx.fillStyle = '#1e3a8a';
+      ctx.fillRect(0, 16, w, 7);
+      const bays = 16;
+      const bayW = w / bays;
+      for (let i = 0; i < bays; i++) {
+        const x = i * bayW;
+        // Concrete structural pier
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillRect(x, 23, 4, h - 23);
+        // Recessed dark garage opening with warm interior work light strip
+        ctx.fillStyle = '#141c28';
+        ctx.fillRect(x + 4, 30, bayW - 6, h - 32);
+        // Glowing fluorescent work light strip inside ceiling of garage
+        const grad = ctx.createLinearGradient(0, 30, 0, 74);
+        grad.addColorStop(0, '#fef3c7');
+        grad.addColorStop(0.25, '#334155');
+        grad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x + 6, 32, bayW - 10, 40);
+        // Garage bay number plaque
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(x + bayW * 0.32, 23, bayW * 0.36, 7);
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 6px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(String(i + 1).padStart(2, '0'), x + bayW * 0.5, 29);
+      }
+    }, 1, 1);
+
+    const giwaTileTex = makeCanvasTex(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#252d38';
+      ctx.fillRect(0, 0, w, h);
+      // Fluted traditional Korean roof tile ribs (암키와 / 수키와)
+      for (let x = 0; x < w; x += 16) {
+        const g = ctx.createLinearGradient(x, 0, x + 16, 0);
+        g.addColorStop(0, '#161b22');
+        g.addColorStop(0.35, '#3b4656');
+        g.addColorStop(0.55, '#475569');
+        g.addColorStop(1, '#181e27');
+        ctx.fillStyle = g;
+        ctx.fillRect(x, 0, 16, h);
+      }
+      // Horizontal overlapping tile rows
+      for (let y = 0; y < h; y += 24) {
+        ctx.fillStyle = 'rgba(10, 14, 20, 0.45)';
+        ctx.fillRect(0, y, w, 3);
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.14)';
+        ctx.fillRect(0, y + 3, w, 2);
+      }
+    }, 3, 2);
+
+    const dancheongTex = makeCanvasTex(256, 64, (ctx, w, h) => {
+      ctx.fillStyle = '#19543e'; // Traditional Korean celadon green base
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#991b1b'; // Crimson beam band
+      ctx.fillRect(0, 0, w, 14);
+      ctx.fillRect(0, h - 12, w, 12);
+      ctx.fillStyle = '#f59e0b'; // Gold accent line
+      ctx.fillRect(0, 14, w, 4);
+      ctx.fillRect(0, h - 16, w, 4);
+      // Repeating lotus / geometric Dancheong medallions
+      for (let x = 16; x < w; x += 32) {
+        ctx.fillStyle = '#1d4ed8';
+        ctx.beginPath();
+        ctx.arc(x, h * 0.5, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.arc(x, h * 0.5, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath();
+        ctx.arc(x, h * 0.5, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }, 3, 1);
+
+    const gantryBannerTex = makeCanvasTex(512, 96, (ctx, w, h) => {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#dc2626';
+      ctx.fillRect(0, 0, w, 14);
+      ctx.fillStyle = '#1d4ed8';
+      ctx.fillRect(0, h - 12, w, 12);
+      // Checkered racing flags on left & right ends
+      for (let side of [10, w - 58]) {
+        for (let r = 0; r < 4; r++) {
+          for (let c = 0; c < 4; c++) {
+            ctx.fillStyle = (r + c) % 2 === 0 ? '#f8fafc' : '#1e293b';
+            ctx.fillRect(side + c * 12, 22 + r * 12, 12, 12);
+          }
+        }
+      }
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '900 28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('KOREA INTERNATIONAL CIRCUIT', w * 0.5, 53);
+      ctx.fillStyle = '#93c5fd';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText('YEONGAM  ·  FIA GRADE 1  ·  5.615 KM', w * 0.5, 76);
+    });
+
+    const checkeredTex = makeCanvasTex(128, 512, (ctx, w, h) => {
+      const sq = 16;
+      for (let y = 0; y < h; y += sq) {
+        for (let x = 0; x < w; x += sq) {
+          ctx.fillStyle = ((x / sq + y / sq) % 2 === 0) ? '#f8fafc' : '#111827';
+          ctx.fillRect(x, y, sq, sq);
+        }
+      }
+    });
+
+    const sponsorWallTex = makeCanvasTex(512, 64, (ctx, w, h) => {
+      const panels = [
+        { bg: '#dc2626', fg: '#ffffff', txt: 'KIC YEONGAM' },
+        { bg: '#0f172a', fg: '#facc15', txt: 'FIA GRADE 1' },
+        { bg: '#1d4ed8', fg: '#ffffff', txt: 'KOREA GP' },
+        { bg: '#f8fafc', fg: '#0f172a', txt: '5.615 KM · 18 TURNS' }
+      ];
+      const pw = w / panels.length;
+      panels.forEach((p, idx) => {
+        ctx.fillStyle = p.bg;
+        ctx.fillRect(idx * pw, 0, pw, h);
+        ctx.fillStyle = p.fg;
+        ctx.font = '900 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.txt, idx * pw + pw * 0.5, 38);
+      });
+    }, 4, 1);
+
+    const jumbotronTex = makeCanvasTex(256, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#090e1a';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#dc2626';
+      ctx.fillRect(0, 0, w, 24);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('KIC LIVE TIMING   LAP 42 / 55', 10, 17);
+      const rows = [
+        ['1', '#ef4444', 'VET', '1:39.605'],
+        ['2', '#f59e0b', 'ALO', '+0.284'],
+        ['3', '#38bdf8', 'HAM', '+0.612'],
+        ['4', '#10b981', 'KIM', '+1.105']
+      ];
+      rows.forEach(([pos, col, drv, tm], idx) => {
+        const ry = 44 + idx * 21;
+        ctx.fillStyle = 'rgba(30,41,59,0.85)';
+        ctx.fillRect(8, ry - 14, w - 16, 17);
+        ctx.fillStyle = col;
+        ctx.fillRect(8, ry - 14, 5, 17);
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 12px monospace';
+        ctx.fillText(`${pos}  ${drv}`, 20, ry - 1);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText(tm, 148, ry - 1);
+      });
+    });
+
+    const timingTowerTex = makeCanvasTex(128, 384, (ctx, w, h) => {
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#dc2626';
+      ctx.fillRect(0, 0, w, 34);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('KIC F1', w * 0.5, 24);
+      const entries = [
+        ['1', '#ef4444', 'VET'], ['2', '#dc2626', 'ALO'], ['3', '#38bdf8', 'HAM'],
+        ['4', '#f59e0b', 'NOR'], ['5', '#10b981', 'LEC'], ['6', '#3b82f6', 'VER'],
+        ['7', '#e2e8f0', 'PIA'], ['8', '#22c55e', 'RUS']
+      ];
+      ctx.textAlign = 'left';
+      entries.forEach(([p, col, name], idx) => {
+        const y = 48 + idx * 40;
+        ctx.fillStyle = '#151e2e';
+        ctx.fillRect(6, y, w - 12, 32);
+        ctx.fillStyle = col;
+        ctx.fillRect(6, y, 8, 32);
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = '900 18px monospace';
+        ctx.fillText(`${p} ${name}`, 22, y + 22);
+      });
+    });
+
+    const helipadTex = makeCanvasTex(256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 14;
+      ctx.beginPath();
+      ctx.arc(w * 0.5, h * 0.5, 96, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(w * 0.5, h * 0.5, 114, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '900 120px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('H', w * 0.5, h * 0.52);
+    });
+
+    function makeBrakeBoardMat(distLabel) {
+      const tex = makeCanvasTex(128, 96, (ctx, w, h) => {
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(4, 4, w - 8, h - 8);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 50px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(distLabel, w * 0.5, h * 0.54);
+      });
+      return new THREE.MeshStandardMaterial({ color: 0xffffff, map: tex, roughness: 0.48, metalness: 0.12 });
+    }
+    const brakeMats = {
+      150: makeBrakeBoardMat('150'),
+      100: makeBrakeBoardMat('100'),
+      50: makeBrakeBoardMat('50')
+    };
+
+    // -------------------------------------------------------------------------
+    // 1. Closed 3D Catmull-Rom Racing Line, Curvature Profile & Tarmac Surfaces
+    // -------------------------------------------------------------------------
     const curvePts = openRaw.map(([lat, lng]) => {
       const { x, z } = worldPosition(lat, lng);
       return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.068, z);
@@ -4390,40 +4948,34 @@
       tangents.push(yeongamTrackCurve.getTangentAt(u).normalize());
     }
 
-    // Precompute curvature & realistic cornering speed profile (fast on 1.2km & Main Straights, braking into hairpins)
     const curvatures = new Float32Array(sampleCount);
     const speedProfile = new Float32Array(sampleCount);
     for (let i = 0; i < sampleCount; i++) {
       const tPrev = tangents[(i - 3 + sampleCount) % sampleCount];
       const tNext = tangents[(i + 3) % sampleCount];
-      // 2D XZ cross product: positive = turning left/right depending on handedness
-      const crossY = tPrev.x * tNext.z - tPrev.z * tNext.x;
-      curvatures[i] = crossY;
+      curvatures[i] = tPrev.x * tNext.z - tPrev.z * tNext.x;
     }
     for (let i = 0; i < sampleCount; i++) {
-      // Look ahead 5 samples so cars brake BEFORE the apex and accelerate out
       const kCurr = Math.abs(curvatures[i]);
       const kAhead = Math.abs(curvatures[(i + 5) % sampleCount]);
       const cornerLoad = Math.max(kCurr, kAhead * 0.92);
-      speedProfile[i] = Math.max(0.56, Math.min(1.28, 1.28 - cornerLoad * 1.45));
+      speedProfile[i] = Math.max(0.54, Math.min(1.30, 1.30 - cornerLoad * 1.48));
     }
 
-    // Track Surface Ribbons: Grey safety verge + FIA Grade-1 dark basalt tarmac (NO toy-like full-loop red border!)
-    const vergeMesh = createRoadRibbon(sampled, 0.42, 0x525d6b, 0.006);
+    // FIA Grade-1 Basalt Asphalt & Safety Verge
+    const vergeMesh = createRoadRibbon(sampled, 0.43, 0x4f5a68, 0.006);
     if (vergeMesh) yeongamCircuitGroup.add(vergeMesh);
-    const trackAsphaltMesh = createRoadRibbon(sampled, 0.33, 0x22272f, 0.018);
+    const trackAsphaltMesh = createRoadRibbon(sampled, 0.34, 0x20252d, 0.018);
     if (trackAsphaltMesh) yeongamCircuitGroup.add(trackAsphaltMesh);
 
     // Crisp White Left & Right Track-Limit Edge Stripes
-    const edgeLineMat = new THREE.LineBasicMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.88 });
-    [-0.285, 0.285].forEach((latOffset) => {
+    const edgeLineMat = new THREE.LineBasicMaterial({ color: 0xf8fafc, transparent: true, opacity: 0.90 });
+    [-0.295, 0.295].forEach((latOffset) => {
       const edgePts = [];
       for (let i = 0; i < sampleCount; i++) {
         const p = sampled[i];
         const t = tangents[i];
-        const nx = -t.z;
-        const nz = t.x;
-        edgePts.push(new THREE.Vector3(p.x + nx * latOffset, p.y + 0.026, p.z + nz * latOffset));
+        edgePts.push(new THREE.Vector3(p.x - t.z * latOffset, p.y + 0.026, p.z + t.x * latOffset));
       }
       yeongamCircuitGroup.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(edgePts), edgeLineMat));
     });
@@ -4444,8 +4996,8 @@
         const { x, z } = worldPosition(lat, lng);
         return new THREE.Vector3(x, surfaceHeight(lat, lng) + 0.068, z);
       });
-      const pitFastBlue = createRoadRibbon(pitPts, 0.22, 0x1d4ed8, 0.008);
-      const pitMesh = createRoadRibbon(pitPts, 0.16, 0x363e4a, 0.016);
+      const pitFastBlue = createRoadRibbon(pitPts, 0.23, 0x1d4ed8, 0.008);
+      const pitMesh = createRoadRibbon(pitPts, 0.17, 0x353d49, 0.016);
       if (pitFastBlue) yeongamCircuitGroup.add(pitFastBlue);
       if (pitMesh) yeongamCircuitGroup.add(pitMesh);
     }
@@ -4463,31 +5015,74 @@
       if (kartMesh) yeongamCircuitGroup.add(kartMesh);
     }
 
-    // Shared PBR architectural & motorsport materials (calibrated platinum-slate contrast to prevent midday glare)
-    const concreteMat = new THREE.MeshStandardMaterial({ color: 0xdfe6ee, roughness: 0.76, metalness: 0.08 });
-    const darkConcreteMat = new THREE.MeshStandardMaterial({ color: 0x8b9bb0, roughness: 0.80, metalness: 0.10 });
-    const steelMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.42, metalness: 0.58 });
-    const silverArmcoMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.36, metalness: 0.68 });
-    const roofCanopyMat = new THREE.MeshStandardMaterial({ color: 0xe6edf5, roughness: 0.44, metalness: 0.16 });
-    const redAccentMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.42, metalness: 0.16 });
-    const cobaltMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.44, metalness: 0.18 });
-    const dancheongColMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.52, metalness: 0.12 });
-    const dancheongBeamMat = new THREE.MeshStandardMaterial({ color: 0x1e5641, roughness: 0.56, metalness: 0.10 });
-    const giwaMat = new THREE.MeshStandardMaterial({ color: 0x222934, roughness: 0.55, metalness: 0.24 });
-    const garageDoorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.50, metalness: 0.42 });
-    const glassMat = new THREE.MeshStandardMaterial({
-      color: 0x60a5fa,
-      emissive: 0x1d4ed8,
-      emissiveIntensity: 0.20,
-      roughness: 0.16,
-      metalness: 0.50
+    // Shared Calibrated PBR Architectural Materials (roughness varied >= 0.25 across adjacent parts)
+    const concreteMat = new THREE.MeshStandardMaterial({ color: 0xdce3ec, roughness: 0.78, metalness: 0.06 });
+    const darkConcreteMat = new THREE.MeshStandardMaterial({ color: 0x8392a5, roughness: 0.82, metalness: 0.08 });
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0x2b3647, roughness: 0.38, metalness: 0.62 });
+    const silverArmcoMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.30, metalness: 0.72 });
+    const roofCanopyMat = new THREE.MeshStandardMaterial({ color: 0xe8eff7, roughness: 0.42, metalness: 0.18 });
+    const redAccentMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.36, metalness: 0.18 });
+    const cobaltMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.38, metalness: 0.20 });
+    const dancheongColMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.50, metalness: 0.10 });
+    const dancheongBeamMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: dancheongTex, roughness: 0.56, metalness: 0.08 });
+    const giwaMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: giwaTileTex, roughness: 0.52, metalness: 0.20 });
+    const seatingMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: seatingTex, roughness: 0.72, metalness: 0.05 });
+    const pitFacadeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: pitFacadeTex, roughness: 0.48, metalness: 0.22 });
+    const sponsorWallMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: sponsorWallTex, roughness: 0.46, metalness: 0.10 });
+    const garageDoorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.48, metalness: 0.42 });
+    const skywalkGlassMat = new THREE.MeshStandardMaterial({
+      color: 0x93c5fd,
+      roughness: 0.12,
+      metalness: 0.45,
+      transparent: true,
+      opacity: 0.62
     });
-    yeongamEmissiveMaterials.push({ mat: glassMat, dayInt: 0.20, nightInt: 1.05 });
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x5aa0f2,
+      emissive: 0x1d4ed8,
+      emissiveIntensity: 0.22,
+      roughness: 0.14,
+      metalness: 0.52
+    });
+    const jumbotronMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: jumbotronTex,
+      emissive: 0xffffff,
+      emissiveMap: jumbotronTex,
+      emissiveIntensity: 0.55,
+      roughness: 0.22,
+      metalness: 0.15
+    });
+    const timingTowerMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: timingTowerTex,
+      emissive: 0xffffff,
+      emissiveMap: timingTowerTex,
+      emissiveIntensity: 0.62,
+      roughness: 0.20,
+      metalness: 0.15
+    });
+    const warmInteriorMat = new THREE.MeshStandardMaterial({
+      color: 0xfef3c7,
+      emissive: 0xfde68a,
+      emissiveIntensity: 0.48,
+      roughness: 0.35
+    });
+    yeongamEmissiveMaterials.push(
+      { mat: glassMat, dayInt: 0.22, nightInt: 1.05 },
+      { mat: jumbotronMat, dayInt: 0.55, nightInt: 1.45 },
+      { mat: timingTowerMat, dayInt: 0.62, nightInt: 1.60 },
+      { mat: warmInteriorMat, dayInt: 0.45, nightInt: 1.75 }
+    );
 
-    // 2. Corner-Localized 3D FIA Red/White Serrated Kerbs & Outer TecPro/Armco Safety Barriers (InstancedMesh)
+    // -------------------------------------------------------------------------
+    // 2. Corner-Localized 3D FIA Kerbs, TecPro/Armco Barriers & Tire Stacks
+    // -------------------------------------------------------------------------
     const kerbTransforms = [];
     const barrierTransforms = [];
+    const tireStackTransforms = [];
     const _dummy = new THREE.Object3D();
+
     for (let i = 0; i < sampleCount; i++) {
       const k = curvatures[i];
       const absK = Math.abs(k);
@@ -4499,27 +5094,26 @@
       const heading = Math.atan2(t.x, t.z);
       const nx = -t.z;
       const nz = t.x;
-      // Inside apex side & outside exit side
       const insideSign = k >= 0 ? -1 : 1;
+
       kerbTransforms.push({
-        x: p.x + nx * insideSign * 0.31,
+        x: p.x + nx * insideSign * 0.32,
         y: p.y + 0.022,
-        z: p.z + nz * insideSign * 0.31,
+        z: p.z + nz * insideSign * 0.32,
         rotY: heading,
         isWhite: (i & 1) === 0
       });
       if (absK > 0.11 || prevK > 0.11) {
         kerbTransforms.push({
-          x: p.x - nx * insideSign * 0.33,
+          x: p.x - nx * insideSign * 0.34,
           y: p.y + 0.022,
-          z: p.z - nz * insideSign * 0.33,
+          z: p.z - nz * insideSign * 0.34,
           rotY: heading,
           isWhite: ((i + 1) & 1) === 0
         });
       }
-      // Outer FIA TecPro / Tire Barrier + Armco Guardrail along outer corner perimeter
       if (absK > 0.095 && (i % 2 === 0)) {
-        const outDist = absK > 0.22 ? 0.68 : 0.56;
+        const outDist = absK > 0.22 ? 0.70 : 0.58;
         barrierTransforms.push({
           x: p.x - nx * insideSign * outDist,
           y: p.y + 0.055,
@@ -4527,11 +5121,20 @@
           rotY: heading,
           isBlue: (i % 6) < 4
         });
+        // Heavy hairpin braking zones get stacked black rubber FIA tire barrier bundles
+        if (absK > 0.24) {
+          tireStackTransforms.push({
+            x: p.x - nx * insideSign * (outDist - 0.11),
+            y: p.y + 0.055,
+            z: p.z - nz * insideSign * (outDist - 0.11),
+            rotY: heading
+          });
+        }
       }
     }
 
     if (kerbTransforms.length > 0) {
-      const kerbGeo = new THREE.BoxGeometry(0.085, 0.026, 0.18);
+      const kerbGeo = new THREE.BoxGeometry(0.09, 0.026, 0.18);
       const kerbBaseMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.06 });
       const kerbInst = new THREE.InstancedMesh(kerbGeo, kerbBaseMat, kerbTransforms.length);
       const cWhite = new THREE.Color(0xf8fafc);
@@ -4546,18 +5149,18 @@
       });
       kerbInst.instanceMatrix.needsUpdate = true;
       if (kerbInst.instanceColor) kerbInst.instanceColor.needsUpdate = true;
+      kerbInst.frustumCulled = false;
       yeongamCircuitGroup.add(kerbInst);
     }
 
     if (barrierTransforms.length > 0) {
       const tecproGeo = new THREE.BoxGeometry(0.09, 0.11, 0.36);
-      const tecproMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.62, metalness: 0.15 });
+      const tecproMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.58, metalness: 0.14 });
       const tecproInst = new THREE.InstancedMesh(tecproGeo, tecproMat, barrierTransforms.length);
       const armcoGeo = new THREE.BoxGeometry(0.04, 0.09, 0.38);
       const armcoInst = new THREE.InstancedMesh(armcoGeo, silverArmcoMat, barrierTransforms.length);
       const cBlue = new THREE.Color(0x1d4ed8);
       const cCrimson = new THREE.Color(0xdc2626);
-
       barrierTransforms.forEach((bt, idx) => {
         _dummy.position.set(bt.x, bt.y, bt.z);
         _dummy.rotation.set(0, bt.rotY, 0);
@@ -4566,34 +5169,53 @@
         tecproInst.setMatrixAt(idx, _dummy.matrix);
         tecproInst.setColorAt(idx, bt.isBlue ? cBlue : cCrimson);
 
-        _dummy.position.set(bt.x, bt.y + 0.05, bt.z);
+        _dummy.position.set(bt.x, bt.y + 0.055, bt.z);
         _dummy.updateMatrix();
         armcoInst.setMatrixAt(idx, _dummy.matrix);
       });
       tecproInst.instanceMatrix.needsUpdate = true;
       if (tecproInst.instanceColor) tecproInst.instanceColor.needsUpdate = true;
       armcoInst.instanceMatrix.needsUpdate = true;
+      tecproInst.frustumCulled = false;
+      armcoInst.frustumCulled = false;
       yeongamCircuitGroup.add(tecproInst, armcoInst);
     }
 
-    // 150m / 100m / 50m FIA Braking Distance Marker Boards before Turn 1 & Turn 3
-    const brakeBoardMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5, metalness: 0.2 });
+    if (tireStackTransforms.length > 0) {
+      const tireStackGeo = new THREE.CylinderGeometry(0.058, 0.058, 0.10, 8);
+      const tireBarrierMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.88, metalness: 0.05 });
+      const tireInst = new THREE.InstancedMesh(tireStackGeo, tireBarrierMat, tireStackTransforms.length);
+      tireStackTransforms.forEach((ts, idx) => {
+        _dummy.position.set(ts.x, ts.y, ts.z);
+        _dummy.rotation.set(0, ts.rotY, 0);
+        _dummy.scale.set(1, 1, 1);
+        _dummy.updateMatrix();
+        tireInst.setMatrixAt(idx, _dummy.matrix);
+      });
+      tireInst.instanceMatrix.needsUpdate = true;
+      tireInst.frustumCulled = false;
+      yeongamCircuitGroup.add(tireInst);
+    }
+
+    // Numbered 150m / 100m / 50m FIA Braking Distance Marker Boards before Turn 1 & Turn 3
     [
-      // Approaching Turn 1 (outside of Main Straight)
-      [34.7382, 126.4170, -0.36],
-      [34.7386, 126.4181, -0.36],
-      [34.7390, 126.4192, -0.36],
-      // Approaching Turn 3 (outside of 1.2km Back Straight)
-      [34.7425, 126.4080, 2.95],
-      [34.7427, 126.4068, 2.95],
-      [34.7429, 126.4056, 2.95]
-    ].forEach(([bLat, bLng, rotY]) => {
+      [34.7382, 126.4170, -0.36, 150],
+      [34.7386, 126.4181, -0.36, 100],
+      [34.7390, 126.4192, -0.36, 50],
+      [34.7425, 126.4080, 2.95, 150],
+      [34.7427, 126.4068, 2.95, 100],
+      [34.7429, 126.4056, 2.95, 50]
+    ].forEach(([bLat, bLng, rotY, distNum]) => {
       const bp = worldPosition(bLat, bLng);
-      const by = surfaceHeight(bLat, bLng) + 0.12;
-      const board = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.03), brakeBoardMat);
-      board.position.set(bp.x, by, bp.z);
-      board.rotation.y = rotY;
-      yeongamCircuitGroup.add(board);
+      const by = surfaceHeight(bLat, bLng) + 0.13;
+      const bGrp = new THREE.Group();
+      bGrp.position.set(bp.x, by, bp.z);
+      bGrp.rotation.y = rotY;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.14, 0.025), steelMat);
+      post.position.y = -0.06;
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.15, 0.03), brakeMats[distNum]);
+      bGrp.add(post, panel);
+      yeongamCircuitGroup.add(bGrp);
     });
 
     // Compute exact Main Straight heading angle from Start Grid -> T1 Braking Zone
@@ -4601,7 +5223,18 @@
     const stB = worldPosition(34.7385, 126.4188);
     const straightAngle = Math.atan2(stB.z - stA.z, stB.x - stA.x);
 
-    // 3. Helper: KIC Signature Korean Hanok Giwa Pedestrian Overpass Bridge (한옥 기와육교)
+    // -------------------------------------------------------------------------
+    // 3. KIC Signature Korean Hanok Giwa Overpass Bridges (한옥 팔작지붕 육교)
+    // -------------------------------------------------------------------------
+    const hanokRoofShape = new THREE.Shape();
+    hanokRoofShape.moveTo(-0.56, 0.02);
+    hanokRoofShape.quadraticCurveTo(-0.24, 0.08, 0, 0.36);
+    hanokRoofShape.quadraticCurveTo(0.24, 0.08, 0.56, 0.02);
+    hanokRoofShape.lineTo(0.56, -0.05);
+    hanokRoofShape.quadraticCurveTo(0.22, 0.01, 0, 0.25);
+    hanokRoofShape.quadraticCurveTo(-0.22, 0.01, -0.56, -0.05);
+    hanokRoofShape.closePath();
+
     function createHanokOverpassBridge(lat, lng, roadAngleRad, spanZ) {
       const bPos = worldPosition(lat, lng);
       const bY = surfaceHeight(lat, lng) + 0.05;
@@ -4611,314 +5244,566 @@
 
       const halfSpan = spanZ * 0.5;
       [-halfSpan, halfSpan].forEach((pz) => {
-        const pier = new THREE.Mesh(new THREE.BoxGeometry(0.46, 1.08, 0.34), concreteMat);
-        pier.position.set(0, 0.54, pz);
+        // Sculpted concrete abutment pier with dark base plinth & staircase tower
+        const pierBase = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.20, 0.44), darkConcreteMat);
+        pierBase.position.set(0, 0.10, pz);
+        bridge.add(pierBase);
+
+        const pier = new THREE.Mesh(new THREE.BoxGeometry(0.48, 1.06, 0.36), concreteMat);
+        pier.position.set(0, 0.58, pz);
         pier.castShadow = true;
         pier.receiveShadow = true;
         bridge.add(pier);
 
-        const stairTower = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.92, 0.28), darkConcreteMat);
-        stairTower.position.set(-0.28, 0.46, pz + (pz > 0 ? 0.24 : -0.24));
+        const stairTower = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.98, 0.32), darkConcreteMat);
+        stairTower.position.set(-0.30, 0.49, pz + (pz > 0 ? 0.26 : -0.26));
         stairTower.castShadow = true;
         bridge.add(stairTower);
+
+        const stairGlass = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.56, 0.16), skywalkGlassMat);
+        stairGlass.position.set(-0.30, 0.58, pz + (pz > 0 ? 0.26 : -0.26));
+        bridge.add(stairGlass);
       });
 
-      const deck = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.16, spanZ + 0.36), roofCanopyMat);
-      deck.position.set(0, 1.04, 0);
+      // Box-girder skywalk deck + KIC sponsor fascia facing oncoming drivers
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.17, spanZ + 0.42), roofCanopyMat);
+      deck.position.set(0, 1.06, 0);
       deck.castShadow = true;
       bridge.add(deck);
 
-      [-0.29, 0.29].forEach((fx) => {
-        const fascia = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.11, spanZ + 0.12), fx < 0 ? redAccentMat : cobaltMat);
-        fascia.position.set(fx, 1.05, 0);
+      [-0.32, 0.32].forEach((fx) => {
+        const fascia = new THREE.Mesh(
+          new THREE.BoxGeometry(0.025, 0.14, spanZ + 0.16),
+          new THREE.MeshStandardMaterial({ color: 0xffffff, map: gantryBannerTex, roughness: 0.40, metalness: 0.12 })
+        );
+        fascia.position.set(fx, 1.07, 0);
         bridge.add(fascia);
       });
 
-      const pavSpan = spanZ * 0.70;
-      const colGeo = new THREE.CylinderGeometry(0.036, 0.042, 0.46, 8);
-      for (let ci = -2; ci <= 2; ci++) {
-        const cz = (ci / 2) * (pavSpan * 0.44);
-        [-0.20, 0.20].forEach((cx) => {
+      // Enclosed glass skywalk corridor + traditional wooden balustrades (난간)
+      const pavSpan = spanZ * 0.74;
+      const glassCorridor = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, pavSpan * 0.94), skywalkGlassMat);
+      glassCorridor.position.set(0, 1.35, 0);
+      bridge.add(glassCorridor);
+
+      [-0.25, 0.25].forEach((rx) => {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, spanZ - 0.18), dancheongColMat);
+        rail.position.set(rx, 1.24, 0);
+        bridge.add(rail);
+      });
+
+      // Crimson Dancheong round timber columns
+      const colGeo = new THREE.CylinderGeometry(0.036, 0.044, 0.48, 8);
+      for (let ci = -3; ci <= 3; ci++) {
+        const cz = (ci / 3) * (pavSpan * 0.46);
+        [-0.23, 0.23].forEach((cx) => {
           const col = new THREE.Mesh(colGeo, dancheongColMat);
-          col.position.set(cx, 1.34, cz);
+          col.position.set(cx, 1.38, cz);
           bridge.add(col);
         });
       }
 
-      const lintel = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.08, pavSpan * 0.94), dancheongBeamMat);
-      lintel.position.set(0, 1.58, 0);
+      // Ornate Dancheong eaves beam (공포·창방)
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.11, pavSpan * 0.98), dancheongBeamMat);
+      lintel.position.set(0, 1.63, 0);
       bridge.add(lintel);
 
-      const lowerEave = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.07, pavSpan * 1.12), giwaMat);
-      lowerEave.position.set(0, 1.66, 0);
-      lowerEave.castShadow = true;
-      bridge.add(lowerEave);
+      // Curved Paljak-jibung (팔작지붕) ExtrudeGeometry Giwa Roof with upturned corner wingtips!
+      const roofLen = pavSpan * 1.06;
+      const roofGeo = new THREE.ExtrudeGeometry(hanokRoofShape, {
+        depth: roofLen,
+        bevelEnabled: false,
+        steps: 1
+      });
+      roofGeo.translate(0, 0, -roofLen * 0.5);
+      const sculptedRoof = new THREE.Mesh(roofGeo, giwaMat);
+      sculptedRoof.position.set(0, 1.72, 0);
+      sculptedRoof.castShadow = true;
+      bridge.add(sculptedRoof);
 
+      // Upturned Korean gable end wings (추녀) & central ridge beam (용마루)
       [-1, 1].forEach((endSign) => {
-        const wingTip = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.055, 0.26), giwaMat);
-        wingTip.position.set(0, 1.70, endSign * (pavSpan * 0.56));
-        wingTip.rotation.x = -endSign * 0.19;
+        const wingTip = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.055, 0.26), giwaMat);
+        wingTip.position.set(0, 1.77, endSign * (roofLen * 0.52));
+        wingTip.rotation.x = -endSign * 0.24;
         bridge.add(wingTip);
+
+        const gableTri = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.05), dancheongBeamMat);
+        gableTri.position.set(0, 1.84, endSign * (roofLen * 0.46));
+        bridge.add(gableTri);
       });
 
-      [-1, 1].forEach((slopeSign) => {
-        const slope = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, pavSpan * 0.96), giwaMat);
-        slope.position.set(slopeSign * 0.19, 1.79, 0);
-        slope.rotation.z = -slopeSign * 0.44;
-        slope.castShadow = true;
-        bridge.add(slope);
-      });
-      const yongmaru = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.09, pavSpan * 0.92), giwaMat);
-      yongmaru.position.set(0, 1.90, 0);
+      const yongmaru = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.095, roofLen * 0.96), giwaMat);
+      yongmaru.position.set(0, 2.09, 0);
       bridge.add(yongmaru);
+
+      // Warm underside pedestrian lighting strip
+      const underGlow = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.025, pavSpan * 0.84), warmInteriorMat);
+      underGlow.position.set(0, 1.56, 0);
+      bridge.add(underGlow);
 
       return bridge;
     }
 
-    // #1 Main Straight Hanok Bridge (spanning both Main Straight & Pit-Out cleanly)
-    yeongamCircuitGroup.add(createHanokOverpassBridge(34.7379, 126.4176, straightAngle, 2.38));
+    // #1 Main Straight Hanok Bridge (spanning Main Straight & Pit-Out)
+    yeongamCircuitGroup.add(createHanokOverpassBridge(34.7379, 126.4176, straightAngle, 2.42));
     // #2 1.2km Back-Straight Hanok Bridge
     const infA = worldPosition(34.7405, 126.4195);
     const infB = worldPosition(34.7422, 126.4094);
     const backStraightAngle = Math.atan2(infB.z - infA.z, infB.x - infA.x);
-    yeongamCircuitGroup.add(createHanokOverpassBridge(34.7414, 126.4146, backStraightAngle, 1.88));
+    yeongamCircuitGroup.add(createHanokOverpassBridge(34.7414, 126.4146, backStraightAngle, 1.92));
 
-    // 4. KIC Main Grandstand (16,000-Seat Stadium Bowl + VIP Skyboxes + Wave Cantilevered Canopy)
+    // -------------------------------------------------------------------------
+    // 4. Remodeled 16,000-Seat KIC Wave-Canopy Main Grandstand Stadium Bowl
+    // -------------------------------------------------------------------------
     const gsPos = worldPosition(34.7383, 126.4145);
     const gsY = surfaceHeight(34.7383, 126.4145) + 0.05;
     const grandstand = new THREE.Group();
     grandstand.position.set(gsPos.x, gsY, gsPos.z);
     grandstand.rotation.y = -straightAngle;
 
-    const gsPlinth = new THREE.Mesh(new THREE.BoxGeometry(6.1, 0.24, 1.50), concreteMat);
-    gsPlinth.position.set(0, 0.12, -0.48);
+    // Ground-level concrete concourse plinth + dark rear service colonnade
+    const gsPlinth = new THREE.Mesh(new THREE.BoxGeometry(6.35, 0.24, 1.66), concreteMat);
+    gsPlinth.position.set(0, 0.12, -0.50);
     gsPlinth.castShadow = true;
     gsPlinth.receiveShadow = true;
     grandstand.add(gsPlinth);
 
-    const seatMats = [cobaltMat, roofCanopyMat, redAccentMat];
+    const gsFrontWall = new THREE.Mesh(new THREE.BoxGeometry(6.24, 0.16, 0.08), sponsorWallMat);
+    gsFrontWall.position.set(0, 0.14, 0.34);
+    grandstand.add(gsFrontWall);
+
+    // 3 Stepped Stadium Seating Tiers with high-res individual-seat & stair-aisle texture!
     [
-      { h: 0.28, y: 0.30, z: 0.02, d: 0.42, w: 5.95 },
-      { h: 0.32, y: 0.56, z: -0.34, d: 0.42, w: 5.80 },
-      { h: 0.36, y: 0.86, z: -0.70, d: 0.42, w: 5.65 }
-    ].forEach((tCfg, idx) => {
+      { h: 0.26, y: 0.28, z: 0.08, d: 0.44, w: 6.18 },
+      { h: 0.34, y: 0.56, z: -0.30, d: 0.46, w: 6.04 },
+      { h: 0.42, y: 0.88, z: -0.70, d: 0.48, w: 5.90 }
+    ].forEach((tCfg) => {
       const bowl = new THREE.Mesh(new THREE.BoxGeometry(tCfg.w, tCfg.h, tCfg.d), concreteMat);
       bowl.position.set(0, tCfg.y, tCfg.z);
       bowl.castShadow = true;
       bowl.receiveShadow = true;
       grandstand.add(bowl);
 
-      const seatBand = new THREE.Mesh(new THREE.BoxGeometry(tCfg.w - 0.12, 0.055, tCfg.d * 0.78), seatMats[idx]);
-      seatBand.position.set(0, tCfg.y + tCfg.h * 0.5 + 0.02, tCfg.z + 0.04);
-      grandstand.add(seatBand);
+      const seatDeck = new THREE.Mesh(new THREE.PlaneGeometry(tCfg.w - 0.10, tCfg.d * 0.96), seatingMat);
+      seatDeck.rotation.x = -Math.PI / 2 + 0.14;
+      seatDeck.position.set(0, tCfg.y + tCfg.h * 0.5 + 0.042, tCfg.z + 0.02);
+      grandstand.add(seatDeck);
     });
 
-    const vipBox = new THREE.Mesh(new THREE.BoxGeometry(5.45, 0.28, 0.52), glassMat);
-    vipBox.position.set(0, 1.22, -0.78);
+    // VIP Hospitality Glass Skyboxes + Glowing Interior Concourse + Steel Balcony Fascia
+    const vipBox = new THREE.Mesh(new THREE.BoxGeometry(5.68, 0.32, 0.56), glassMat);
+    vipBox.position.set(0, 1.26, -0.82);
     grandstand.add(vipBox);
 
-    const bayCount = 7;
-    const bayW = 6.16 / bayCount;
+    const vipBalcony = new THREE.Mesh(new THREE.BoxGeometry(5.78, 0.06, 0.16), roofCanopyMat);
+    vipBalcony.position.set(0, 1.12, -0.49);
+    grandstand.add(vipBalcony);
+
+    const vipHeader = new THREE.Mesh(new THREE.BoxGeometry(5.76, 0.065, 0.10), redAccentMat);
+    vipHeader.position.set(0, 1.44, -0.52);
+    grandstand.add(vipHeader);
+
+    // Sculpted Curved Cantilevered Wave Canopy (9 sweeping bays + arched steel ribs + cable stays!)
+    const bayCount = 9;
+    const totalCanopyW = 6.42;
+    const bayW = totalCanopyW / bayCount;
+    const canopyRibCurvePts = [
+      new THREE.Vector3(0, 1.54, -1.26),
+      new THREE.Vector3(0, 1.78, -0.54),
+      new THREE.Vector3(0, 1.72, 0.24),
+      new THREE.Vector3(0, 1.52, 0.78)
+    ];
+    const canopyRibCurve = new THREE.CatmullRomCurve3(canopyRibCurvePts);
+    const canopyRibGeo = new THREE.TubeGeometry(canopyRibCurve, 14, 0.036, 6, false);
+
+    // Wing-profile canopy section extruded across each bay
+    const wingShape = new THREE.Shape();
+    wingShape.moveTo(-1.24, -0.04);
+    wingShape.quadraticCurveTo(-0.32, 0.22, 0.76, -0.06);
+    wingShape.lineTo(0.76, -0.11);
+    wingShape.quadraticCurveTo(-0.32, 0.14, -1.24, -0.09);
+    wingShape.closePath();
+    const bayRoofGeo = new THREE.ExtrudeGeometry(wingShape, {
+      depth: bayW - 0.03,
+      bevelEnabled: false,
+      steps: 1
+    });
+    bayRoofGeo.rotateY(-Math.PI / 2);
+    bayRoofGeo.translate((bayW - 0.03) * 0.5, 0, 0);
+
     for (let b = 0; b < bayCount; b++) {
       const bx = (b - (bayCount - 1) * 0.5) * bayW;
-      const waveLift = Math.cos(((b / (bayCount - 1)) - 0.5) * Math.PI * 1.6) * 0.17;
-      const roofPanel = new THREE.Mesh(new THREE.BoxGeometry(bayW - 0.04, 0.08, 1.88), roofCanopyMat);
-      roofPanel.position.set(bx, 1.56 + waveLift, -0.28);
-      roofPanel.rotation.x = 0.15;
-      roofPanel.castShadow = true;
-      grandstand.add(roofPanel);
+      const u = b / (bayCount - 1);
+      // Iconic KIC flowing double-wave roofline
+      const waveLift = Math.sin(u * Math.PI) * 0.20 + Math.cos((u - 0.5) * Math.PI * 3.0) * 0.055;
 
-      // Dark structural steel spine beam atop each canopy bay for crisp daylight definition
-      const roofSpine = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.10, 1.90), steelMat);
-      roofSpine.position.set(bx, 1.58 + waveLift, -0.28);
-      roofSpine.rotation.x = 0.15;
-      grandstand.add(roofSpine);
+      const bayRoof = new THREE.Mesh(bayRoofGeo, roofCanopyMat);
+      bayRoof.position.set(bx, 1.62 + waveLift, 0);
+      bayRoof.castShadow = true;
+      grandstand.add(bayRoof);
 
-      const frontTrim = new THREE.Mesh(new THREE.BoxGeometry(bayW - 0.02, 0.055, 0.11), redAccentMat);
-      frontTrim.position.set(bx, 1.42 + waveLift, 0.63);
+      // Arched structural steel spine rib
+      const rib = new THREE.Mesh(canopyRibGeo, steelMat);
+      rib.position.set(bx, waveLift, 0);
+      grandstand.add(rib);
+
+      // Crimson aerodynamic leading-edge trim
+      const frontTrim = new THREE.Mesh(new THREE.BoxGeometry(bayW - 0.01, 0.055, 0.09), redAccentMat);
+      frontTrim.position.set(bx, 1.51 + waveLift, 0.76);
       grandstand.add(frontTrim);
 
-      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.11, 1.72 + waveLift, 0.14), steelMat);
-      mast.position.set(bx, (1.72 + waveLift) * 0.5, -1.16);
+      // Warm underside stadium floodlight bar
+      const underLight = new THREE.Mesh(new THREE.BoxGeometry(bayW * 0.62, 0.025, 0.06), warmInteriorMat);
+      underLight.position.set(bx, 1.54 + waveLift, 0.42);
+      grandstand.add(underLight);
+
+      // Tapered rear A-frame steel mast + diagonal tension cable stay
+      const mastH = 2.08 + waveLift;
+      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.11, mastH, 0.14), steelMat);
+      mast.position.set(bx, mastH * 0.5, -1.24);
       mast.castShadow = true;
       grandstand.add(mast);
 
-      const tieStrut = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 1.12), silverArmcoMat);
-      tieStrut.position.set(bx, 1.66 + waveLift, -0.64);
-      tieStrut.rotation.x = 0.18;
-      grandstand.add(tieStrut);
+      const cableStay = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1.48, 5), silverArmcoMat);
+      cableStay.position.set(bx, 1.88 + waveLift, -0.56);
+      cableStay.rotation.x = Math.PI / 2 - 0.28;
+      grandstand.add(cableStay);
     }
     yeongamCircuitGroup.add(grandstand);
 
-    // 5. 24-Bay Pit Building, Paddock Club Terrace, Pit-Wall Pratfalls & Team Transporter Trucks
+    // -------------------------------------------------------------------------
+    // 5. Remodeled 24-Bay Pit Building, FIA Podium Balcony, Pit Booms & Motorhomes
+    // -------------------------------------------------------------------------
     const pitPos = worldPosition(34.7357, 126.4163);
     const pitY = surfaceHeight(34.7357, 126.4163) + 0.05;
     const pitBuilding = new THREE.Group();
     pitBuilding.position.set(pitPos.x, pitY, pitPos.z);
     pitBuilding.rotation.y = -straightAngle;
 
-    const pitCore = new THREE.Mesh(new THREE.BoxGeometry(4.9, 0.44, 0.98), concreteMat);
-    pitCore.position.y = 0.22;
+    // Ground-floor pit garage structure with high-res numbered illuminated garage facade
+    const pitCore = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.46, 1.04), concreteMat);
+    pitCore.position.y = 0.23;
     pitCore.castShadow = true;
     pitCore.receiveShadow = true;
     pitBuilding.add(pitCore);
 
-    const doorGeo = new THREE.BoxGeometry(0.20, 0.28, 0.05);
-    for (let g = 0; g < 18; g++) {
-      const gx = (g - 8.5) * 0.26;
-      const door = new THREE.Mesh(doorGeo, garageDoorMat);
-      door.position.set(gx, 0.16, -0.48);
-      pitBuilding.add(door);
-    }
-    const garageHeader = new THREE.Mesh(new THREE.BoxGeometry(4.88, 0.06, 0.08), redAccentMat);
-    garageHeader.position.set(0, 0.36, -0.49);
-    pitBuilding.add(garageHeader);
+    const pitGarageFront = new THREE.Mesh(new THREE.PlaneGeometry(5.16, 0.44), pitFacadeMat);
+    pitGarageFront.position.set(0, 0.23, -0.525);
+    pitGarageFront.rotation.y = Math.PI;
+    pitBuilding.add(pitGarageFront);
 
-    const pitUpperGlass = new THREE.Mesh(new THREE.BoxGeometry(4.78, 0.34, 1.04), glassMat);
-    pitUpperGlass.position.y = 0.61;
+    // Overhanging team pit-stop wheel-gun gantries (10 booms extending over Pit Apron!)
+    for (let g = 0; g < 10; g++) {
+      const gx = (g - 4.5) * 0.50;
+      const boomArm = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, 0.44), steelMat);
+      boomArm.position.set(gx, 0.42, -0.74);
+      pitBuilding.add(boomArm);
+      const boomLight = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.025, 0.05), warmInteriorMat);
+      boomLight.position.set(gx, 0.40, -0.92);
+      pitBuilding.add(boomLight);
+    }
+
+    // 2nd & 3rd Floor Paddock Club Glass Hospitality Pavilion + Terrace Railings
+    const pitUpperGlass = new THREE.Mesh(new THREE.BoxGeometry(5.06, 0.38, 1.08), glassMat);
+    pitUpperGlass.position.y = 0.65;
     pitBuilding.add(pitUpperGlass);
 
-    const pitOverhang = new THREE.Mesh(new THREE.BoxGeometry(5.04, 0.08, 1.26), roofCanopyMat);
-    pitOverhang.position.y = 0.83;
+    const terraceDeck = new THREE.Mesh(new THREE.BoxGeometry(5.24, 0.055, 0.22), roofCanopyMat);
+    terraceDeck.position.set(0, 0.48, -0.60);
+    pitBuilding.add(terraceDeck);
+
+    const pitOverhang = new THREE.Mesh(new THREE.BoxGeometry(5.36, 0.085, 1.38), roofCanopyMat);
+    pitOverhang.position.y = 0.88;
     pitOverhang.castShadow = true;
     pitBuilding.add(pitOverhang);
 
-    // Rooftop solar / mechanical louver bays on Pit Building roof
+    // Rooftop Paddock Club solar/louver mechanical bays & crimson roof trim
+    const pitRoofTrim = new THREE.Mesh(new THREE.BoxGeometry(5.38, 0.045, 0.06), redAccentMat);
+    pitRoofTrim.position.set(0, 0.89, -0.68);
+    pitBuilding.add(pitRoofTrim);
     for (let lv = -2; lv <= 2; lv++) {
-      const louver = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.045, 0.56), darkConcreteMat);
-      louver.position.set(lv * 0.92, 0.89, 0.08);
+      const louver = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.06, 0.60), darkConcreteMat);
+      louver.position.set(lv * 0.96, 0.95, 0.08);
       pitBuilding.add(louver);
     }
 
-    const pitWall = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.16, 0.07), concreteMat);
-    pitWall.position.set(-0.08, 0.08, -1.08);
+    // Cantilevered FIA Winners' Podium Balcony protruding over the Pit Lane near Start/Finish!
+    const podiumDeck = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.08, 0.48), roofCanopyMat);
+    podiumDeck.position.set(-1.35, 0.60, -0.76);
+    pitBuilding.add(podiumDeck);
+    const podiumBack = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.28, 0.05), sponsorWallMat);
+    podiumBack.position.set(-1.35, 0.78, -0.54);
+    pitBuilding.add(podiumBack);
+    const podiumCanopy = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.05, 0.52), redAccentMat);
+    podiumCanopy.position.set(-1.35, 0.94, -0.76);
+    pitBuilding.add(podiumCanopy);
+
+    // Pit Wall with Sponsor Graphics, Telemetry Timing Stands & FIA Debris Catch Fence
+    const pitWall = new THREE.Mesh(new THREE.BoxGeometry(5.45, 0.17, 0.08), sponsorWallMat);
+    pitWall.position.set(-0.08, 0.085, -1.12);
     pitBuilding.add(pitWall);
 
-    const timingBoxGeo = new THREE.BoxGeometry(0.38, 0.20, 0.13);
+    // Semi-transparent FIA debris catch fence mesh + vertical metallic posts along pit wall
+    const catchFenceMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(5.45, 0.32),
+      new THREE.MeshBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false })
+    );
+    catchFenceMesh.position.set(-0.08, 0.33, -1.12);
+    pitBuilding.add(catchFenceMesh);
+    for (let fp = -6; fp <= 6; fp++) {
+      const fPost = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.36, 0.022), silverArmcoMat);
+      fPost.position.set(-0.08 + fp * 0.44, 0.34, -1.12);
+      pitBuilding.add(fPost);
+    }
+
+    const timingBoxGeo = new THREE.BoxGeometry(0.40, 0.22, 0.14);
     for (let tw = -2; tw <= 3; tw++) {
-      const tStand = new THREE.Mesh(timingBoxGeo, cobaltMat);
-      tStand.position.set(tw * 0.78 - 0.28, 0.24, -1.08);
+      const tStand = new THREE.Mesh(timingBoxGeo, tw % 2 === 0 ? cobaltMat : steelMat);
+      tStand.position.set(tw * 0.80 - 0.28, 0.25, -1.10);
       pitBuilding.add(tStand);
+      const tCanopy = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.03, 0.20), roofCanopyMat);
+      tCanopy.position.set(tw * 0.80 - 0.28, 0.37, -1.10);
+      pitBuilding.add(tCanopy);
+    }
+
+    // Paddock Compound: 2-Story Team Hospitality Motorhomes + 8 Composite Team Transporter Semis
+    const motorhomeColors = [redAccentMat, cobaltMat, steelMat, roofCanopyMat];
+    for (let mh = 0; mh < 4; mh++) {
+      const mx = (mh - 1.5) * 1.04;
+      const mhBody = new THREE.Mesh(new THREE.BoxGeometry(0.80, 0.34, 0.52), motorhomeColors[mh]);
+      mhBody.position.set(mx, 0.17, 1.84);
+      mhBody.castShadow = true;
+      pitBuilding.add(mhBody);
+      const mhGlass = new THREE.Mesh(new THREE.BoxGeometry(0.70, 0.16, 0.54), glassMat);
+      mhGlass.position.set(mx, 0.22, 1.84);
+      pitBuilding.add(mhGlass);
     }
 
     const trailerColors = [redAccentMat, cobaltMat, roofCanopyMat, steelMat, redAccentMat, roofCanopyMat, cobaltMat, roofCanopyMat];
-    const trailerGeo = new THREE.BoxGeometry(0.22, 0.22, 0.72);
-    const cabGeo = new THREE.BoxGeometry(0.20, 0.18, 0.18);
+    const trailerGeo = new THREE.BoxGeometry(0.22, 0.23, 0.68);
+    const cabGeo = new THREE.BoxGeometry(0.20, 0.19, 0.18);
     for (let tr = 0; tr < 8; tr++) {
-      const tx = (tr - 3.5) * 0.58;
+      const tx = (tr - 3.5) * 0.56;
       const trailer = new THREE.Mesh(trailerGeo, trailerColors[tr]);
-      trailer.position.set(tx, 0.13, 1.08);
+      trailer.position.set(tx, 0.14, 0.94);
       trailer.castShadow = true;
       pitBuilding.add(trailer);
 
       const cab = new THREE.Mesh(cabGeo, steelMat);
-      cab.position.set(tx, 0.11, 1.56);
+      cab.position.set(tx, 0.12, 1.40);
       pitBuilding.add(cab);
+
+      const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.08, 0.03), glassMat);
+      windshield.position.set(tx, 0.15, 1.49);
+      pitBuilding.add(windshield);
     }
 
     yeongamCircuitGroup.add(pitBuilding);
 
-    // 6. Start/Finish FIA Timing Gantry with 5 Red Start Light Pods & Checkered Banner
+    // -------------------------------------------------------------------------
+    // 6. Start/Finish FIA Timing Gantry, Checkered Line, 3D Grid Boxes & Vertical Timing Tower
+    // -------------------------------------------------------------------------
     const gantryPos = worldPosition(34.7370, 126.4147);
     const gantryY = surfaceHeight(34.7370, 126.4147) + 0.05;
     const gantry = new THREE.Group();
     gantry.position.set(gantryPos.x, gantryY, gantryPos.z);
     gantry.rotation.y = -straightAngle;
 
-    [-0.90, 0.90].forEach((sideZ) => {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.11, 1.18, 0.11), steelMat);
-      post.position.set(0, 0.59, sideZ);
+    [-0.96, 0.96].forEach((sideZ) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.28, 0.12), steelMat);
+      post.position.set(0, 0.64, sideZ);
       post.castShadow = true;
       gantry.add(post);
+      const brace = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.24), darkConcreteMat);
+      brace.position.set(0, 0.06, sideZ);
+      gantry.add(brace);
     });
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 1.98), steelMat);
-    beam.position.set(0, 1.14, 0);
+
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 2.08), steelMat);
+    beam.position.set(0, 1.20, 0);
     beam.castShadow = true;
     gantry.add(beam);
 
-    const bannerTop = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.08, 1.68), roofCanopyMat);
-    bannerTop.position.set(0, 1.28, 0);
-    gantry.add(bannerTop);
+    // Front & back KOREA INTERNATIONAL CIRCUIT FIA Gantry Banners
+    const gantrySignMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: gantryBannerTex, roughness: 0.36, metalness: 0.12 });
+    [-0.125, 0.125].forEach((sx) => {
+      const signPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.98, 0.27), gantrySignMat);
+      signPlane.position.set(sx, 1.21, 0);
+      signPlane.rotation.y = sx < 0 ? -Math.PI / 2 : Math.PI / 2;
+      gantry.add(signPlane);
+    });
 
+    // High-res Checkered Start/Finish Line across Main Straight tarmac
     const sfStripe = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.14, 0.64),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: -4 })
+      new THREE.PlaneGeometry(0.20, 0.66),
+      new THREE.MeshBasicMaterial({ map: checkeredTex, polygonOffset: true, polygonOffsetFactor: -4 })
     );
     sfStripe.rotation.x = -Math.PI / 2;
-    sfStripe.position.set(0, 0.045, 0);
+    sfStripe.position.set(0, 0.044, 0);
     gantry.add(sfStripe);
 
+    // 5 FIA Red Start Light Pods + Ambient Race Start Glow
     const raceLightMat = new THREE.MeshStandardMaterial({
       color: 0xff2b2b,
       emissive: 0xef4444,
-      emissiveIntensity: 1.05,
-      roughness: 0.2
+      emissiveIntensity: 1.15,
+      roughness: 0.18
     });
-    yeongamEmissiveMaterials.push({ mat: raceLightMat, dayInt: 1.05, nightInt: 2.4 });
+    yeongamEmissiveMaterials.push({ mat: raceLightMat, dayInt: 1.15, nightInt: 2.5 });
     [-0.44, -0.22, 0, 0.22, 0.44].forEach((lz) => {
-      const podBox = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.09), garageDoorMat);
-      podBox.position.set(-0.13, 1.08, lz);
+      const podBox = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.09), garageDoorMat);
+      podBox.position.set(-0.15, 1.04, lz);
       gantry.add(podBox);
-      const pod = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 8), raceLightMat);
-      pod.position.set(-0.17, 1.08, lz);
+      const pod = new THREE.Mesh(new THREE.SphereGeometry(0.046, 8, 8), raceLightMat);
+      pod.position.set(-0.19, 1.04, lz);
       gantry.add(pod);
     });
+
+    // Vertical F1 Live Position Timing Tower standing beside Pit Wall!
+    const timingPylon = new THREE.Mesh(new THREE.BoxGeometry(0.32, 2.25, 0.32), steelMat);
+    timingPylon.position.set(1.55, 1.12, 1.04);
+    timingPylon.castShadow = true;
+    gantry.add(timingPylon);
+    const timingScreenFront = new THREE.Mesh(new THREE.BoxGeometry(0.34, 1.48, 0.34), timingTowerMat);
+    timingScreenFront.position.set(1.55, 1.44, 1.04);
+    gantry.add(timingScreenFront);
+    const timingCap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.08, 0.38), redAccentMat);
+    timingCap.position.set(1.55, 2.24, 1.04);
+    gantry.add(timingCap);
+
     yeongamCircuitGroup.add(gantry);
 
-    // 7. KIC Race Control Tower & Cantilevered Media Center (seated cleanly inside Paddock West apron, clear of T18!)
+    // -------------------------------------------------------------------------
+    // 7. Remodeled Race Control Tower, Media Center & Medical Helipad + Rescue Helicopter
+    // -------------------------------------------------------------------------
     const tcPos = worldPosition(34.7348, 126.4136);
     const tcY = surfaceHeight(34.7348, 126.4136) + 0.05;
     const tower = new THREE.Group();
     tower.position.set(tcPos.x, tcY, tcPos.z);
     tower.rotation.y = -straightAngle;
 
-    const mediaWing = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.44, 0.82), concreteMat);
-    mediaWing.position.set(0.78, 0.22, 0.06);
+    const mediaWing = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.48, 0.86), concreteMat);
+    mediaWing.position.set(0.84, 0.24, 0.06);
     mediaWing.castShadow = true;
     tower.add(mediaWing);
-    const mediaGlass = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.22, 0.86), glassMat);
-    mediaGlass.position.set(0.78, 0.29, 0.06);
+    const mediaGlass = new THREE.Mesh(new THREE.BoxGeometry(1.54, 0.24, 0.90), glassMat);
+    mediaGlass.position.set(0.84, 0.31, 0.06);
     tower.add(mediaGlass);
+    const mediaRoofTrim = new THREE.Mesh(new THREE.BoxGeometry(1.66, 0.05, 0.90), redAccentMat);
+    mediaRoofTrim.position.set(0.84, 0.50, 0.06);
+    tower.add(mediaRoofTrim);
 
-    const towerBase = new THREE.Mesh(new THREE.BoxGeometry(1.04, 0.34, 1.04), concreteMat);
-    towerBase.position.y = 0.17;
+    const towerBase = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.38, 1.12), concreteMat);
+    towerBase.position.y = 0.19;
     tower.add(towerBase);
 
-    const towerShaft = new THREE.Mesh(new THREE.BoxGeometry(0.64, 1.56, 0.64), concreteMat);
-    towerShaft.position.y = 1.08;
+    const towerShaft = new THREE.Mesh(new THREE.BoxGeometry(0.68, 1.64, 0.68), concreteMat);
+    towerShaft.position.y = 1.12;
     towerShaft.castShadow = true;
     tower.add(towerShaft);
 
-    const towerShaftRib = new THREE.Mesh(new THREE.BoxGeometry(0.20, 1.58, 0.70), redAccentMat);
-    towerShaftRib.position.y = 1.08;
+    const towerShaftRib = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.66, 0.74), redAccentMat);
+    towerShaftRib.position.y = 1.12;
     tower.add(towerShaftRib);
 
-    const towerObsLower = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.24, 0.94), glassMat);
-    towerObsLower.position.y = 1.92;
+    // Multi-tier octagonal race-steward glass observation pods
+    const towerObsLower = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.48, 0.26, 8), glassMat);
+    towerObsLower.position.y = 1.98;
+    towerObsLower.rotation.y = Math.PI / 8;
     tower.add(towerObsLower);
 
-    const towerObsUpper = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.26, 1.12), glassMat);
-    towerObsUpper.position.y = 2.20;
+    const towerDeckRing = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.06, 8), roofCanopyMat);
+    towerDeckRing.position.y = 2.13;
+    towerDeckRing.rotation.y = Math.PI / 8;
+    tower.add(towerDeckRing);
+
+    const towerObsUpper = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.58, 0.28, 8), glassMat);
+    towerObsUpper.position.y = 2.30;
+    towerObsUpper.rotation.y = Math.PI / 8;
     tower.add(towerObsUpper);
 
-    const giwaEaves = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.10, 1.48), giwaMat);
-    giwaEaves.position.y = 2.40;
+    const dancheongCrown = new THREE.Mesh(new THREE.BoxGeometry(1.26, 0.08, 1.26), dancheongBeamMat);
+    dancheongCrown.position.y = 2.48;
+    tower.add(dancheongCrown);
+
+    const giwaEaves = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.10, 1.56), giwaMat);
+    giwaEaves.position.y = 2.57;
     giwaEaves.castShadow = true;
     tower.add(giwaEaves);
 
-    const giwaRoof = new THREE.Mesh(new THREE.ConeGeometry(1.06, 0.44, 4), giwaMat);
-    giwaRoof.position.y = 2.66;
+    const giwaRoof = new THREE.Mesh(new THREE.ConeGeometry(1.12, 0.48, 4), giwaMat);
+    giwaRoof.position.y = 2.86;
     giwaRoof.rotation.y = Math.PI / 4;
     giwaRoof.castShadow = true;
     tower.add(giwaRoof);
 
-    const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, 0.62, 6), silverArmcoMat);
-    spire.position.y = 3.14;
+    // Telemetry radar dome & aviation beacon spire
+    const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.036, 0.68, 6), silverArmcoMat);
+    spire.position.y = 3.38;
     tower.add(spire);
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), raceLightMat);
+    beacon.position.y = 3.74;
+    tower.add(beacon);
 
     yeongamCircuitGroup.add(tower);
 
-    // 8. Secondary Stadium Grandstands (Turn 1, Turn 3 Hairpin, Infield T5, Marina Waterfront T11-12) & Karting Center
+    // Dedicated FIA Medical Helipad Apron + Parked Motorsport Rescue Helicopter on East Paddock Terrace
+    const heliSitePos = worldPosition(34.7367, 126.4218);
+    const heliSiteY = surfaceHeight(34.7367, 126.4218) + 0.05;
+    const heliComplex = new THREE.Group();
+    heliComplex.position.set(heliSitePos.x, heliSiteY, heliSitePos.z);
+    heliComplex.rotation.y = -straightAngle;
+
+    const heliPlinth = new THREE.Mesh(new THREE.BoxGeometry(1.36, 0.08, 1.36), darkConcreteMat);
+    heliPlinth.position.y = 0.04;
+    heliPlinth.receiveShadow = true;
+    heliComplex.add(heliPlinth);
+
+    const heliPad = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.22, 1.22),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, map: helipadTex, roughness: 0.78, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: -3 })
+    );
+    heliPad.rotation.x = -Math.PI / 2;
+    heliPad.position.set(0, 0.086, 0);
+    heliComplex.add(heliPad);
+
+    [[-0.60, -0.60], [0.60, -0.60], [-0.60, 0.60], [0.60, 0.60]].forEach(([cx, cz]) => {
+      const hBeacon = new THREE.Mesh(new THREE.SphereGeometry(0.032, 6, 6), warmInteriorMat);
+      hBeacon.position.set(cx, 0.10, cz);
+      heliComplex.add(hBeacon);
+    });
+
+    const heli = new THREE.Group();
+    heli.position.set(0, 0.09, 0);
+    heli.rotation.y = 0.55;
+    const heliFuselage = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.52), roofCanopyMat);
+    heliFuselage.position.y = 0.14;
+    heliFuselage.castShadow = true;
+    const heliStripe = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.05, 0.50), redAccentMat);
+    heliStripe.position.y = 0.13;
+    const heliCockpit = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.22), glassMat);
+    heliCockpit.position.set(0, 0.16, 0.22);
+    const heliTail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.44), redAccentMat);
+    heliTail.position.set(0, 0.16, -0.44);
+    const heliFin = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, 0.10), redAccentMat);
+    heliFin.position.set(0, 0.22, -0.62);
+    const heliRotor1 = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.015, 0.045), steelMat);
+    heliRotor1.position.set(0, 0.28, 0.02);
+    const heliRotor2 = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.015, 0.92), steelMat);
+    heliRotor2.position.set(0, 0.28, 0.02);
+    [-0.12, 0.12].forEach((sx) => {
+      const skid = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, 0.48), steelMat);
+      skid.position.set(sx, 0.02, 0.02);
+      heli.add(skid);
+    });
+    heli.add(heliFuselage, heliStripe, heliCockpit, heliTail, heliFin, heliRotor1, heliRotor2);
+    heliComplex.add(heli);
+    yeongamCircuitGroup.add(heliComplex);
+
+    // -------------------------------------------------------------------------
+    // 8. Upgraded 2-Tier Secondary Grandstands, Trackside Giant LED Jumbotrons & Karting Center
+    // -------------------------------------------------------------------------
     function createSecondaryStand(lat, lng, widthX, rotY, accentMat) {
       const sp = worldPosition(lat, lng);
       const sy = surfaceHeight(lat, lng) + 0.05;
@@ -4926,89 +5811,175 @@
       st.position.set(sp.x, sy, sp.z);
       st.rotation.y = rotY;
 
-      const base = new THREE.Mesh(new THREE.BoxGeometry(widthX, 0.34, 0.72), concreteMat);
-      base.position.set(0, 0.17, 0);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(widthX, 0.36, 0.80), concreteMat);
+      base.position.set(0, 0.18, 0);
       base.castShadow = true;
       base.receiveShadow = true;
       st.add(base);
 
-      const seats = new THREE.Mesh(new THREE.BoxGeometry(widthX - 0.12, 0.16, 0.56), accentMat);
-      seats.position.set(0, 0.38, 0.08);
-      seats.rotation.x = 0.22;
-      st.add(seats);
+      const frontBanner = new THREE.Mesh(new THREE.BoxGeometry(widthX, 0.12, 0.05), sponsorWallMat);
+      frontBanner.position.set(0, 0.12, 0.41);
+      st.add(frontBanner);
 
-      const shadeRoof = new THREE.Mesh(new THREE.BoxGeometry(widthX + 0.14, 0.06, 0.84), roofCanopyMat);
-      shadeRoof.position.set(0, 0.72, 0.04);
+      const seatDeck = new THREE.Mesh(new THREE.PlaneGeometry(widthX - 0.10, 0.72), seatingMat);
+      seatDeck.rotation.x = -Math.PI / 2 + 0.16;
+      seatDeck.position.set(0, 0.43, 0.04);
+      st.add(seatDeck);
+
+      const shadeRoof = new THREE.Mesh(new THREE.BoxGeometry(widthX + 0.18, 0.065, 0.94), roofCanopyMat);
+      shadeRoof.position.set(0, 0.80, 0.04);
       shadeRoof.rotation.x = 0.14;
       shadeRoof.castShadow = true;
       st.add(shadeRoof);
 
-      [-widthX * 0.38, 0, widthX * 0.38].forEach((px) => {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.70, 0.08), steelMat);
-        post.position.set(px, 0.36, -0.30);
+      const trim = new THREE.Mesh(new THREE.BoxGeometry(widthX + 0.18, 0.045, 0.07), accentMat);
+      trim.position.set(0, 0.73, 0.50);
+      st.add(trim);
+
+      [-widthX * 0.40, -widthX * 0.14, widthX * 0.14, widthX * 0.40].forEach((px) => {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.82, 0.08), steelMat);
+        post.position.set(px, 0.41, -0.34);
         st.add(post);
       });
       return st;
     }
 
     yeongamCircuitGroup.add(
-      createSecondaryStand(34.7400, 126.4213, 2.2, -2.25, redAccentMat),  // Turn 1 Braking Stand
-      createSecondaryStand(34.7436, 126.4048, 2.5, 0.45, cobaltMat),      // Turn 3 Overtaking Hairpin Stand
-      createSecondaryStand(34.7416, 126.4096, 1.9, 0.12, cobaltMat),      // Infield Crest Stand
-      createSecondaryStand(34.7298, 126.4226, 2.6, 2.65, cobaltMat)       // Marina Waterfront Stand (Turns 11-12)
+      createSecondaryStand(34.7400, 126.4213, 2.35, -2.25, redAccentMat),  // Turn 1 Braking Stand
+      createSecondaryStand(34.7436, 126.4048, 2.65, 0.45, cobaltMat),      // Turn 3 Overtaking Hairpin Stand
+      createSecondaryStand(34.7416, 126.4096, 2.05, 0.12, cobaltMat),      // Infield Crest Stand
+      createSecondaryStand(34.7298, 126.4226, 2.75, 2.65, cobaltMat)       // Marina Waterfront Stand
     );
+
+    // Giant Glowing Trackside LED Jumbotron Screens (Main Straight, Turn 3 Hairpin, Marina)
+    [
+      { lat: 34.7366, lng: 126.4176, rotY: -straightAngle + Math.PI },
+      { lat: 34.7420, lng: 126.4036, rotY: 0.75 },
+      { lat: 34.7316, lng: 126.4234, rotY: -2.45 }
+    ].forEach((jCfg) => {
+      const jp = worldPosition(jCfg.lat, jCfg.lng);
+      const jy = surfaceHeight(jCfg.lat, jCfg.lng) + 0.05;
+      const jb = new THREE.Group();
+      jb.position.set(jp.x, jy, jp.z);
+      jb.rotation.y = jCfg.rotY;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.65, 8), steelMat);
+      pole.position.y = 0.32;
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.50, 0.08), steelMat);
+      frame.position.y = 0.78;
+      frame.castShadow = true;
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.84, 0.42), jumbotronMat);
+      screen.position.set(0, 0.78, 0.045);
+      jb.add(pole, frame, screen);
+      yeongamCircuitGroup.add(jb);
+    });
 
     // KIC Karting & Driving Experience Center Building
     const kartBldgPos = worldPosition(34.7347, 126.4052);
     const kartBldg = new THREE.Group();
     kartBldg.position.set(kartBldgPos.x, surfaceHeight(34.7347, 126.4052) + 0.05, kartBldgPos.z);
     kartBldg.rotation.y = 0.18;
-    const kbCore = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.30, 0.52), concreteMat);
-    kbCore.position.y = 0.15;
+    const kbCore = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.32, 0.56), concreteMat);
+    kbCore.position.y = 0.16;
     kbCore.castShadow = true;
     kartBldg.add(kbCore);
-    const kbRoof = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.06, 0.66), cobaltMat);
-    kbRoof.position.y = 0.33;
+    const kbGlass = new THREE.Mesh(new THREE.BoxGeometry(1.28, 0.16, 0.58), glassMat);
+    kbGlass.position.y = 0.19;
+    kartBldg.add(kbGlass);
+    const kbRoof = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.065, 0.70), cobaltMat);
+    kbRoof.position.y = 0.35;
     kartBldg.add(kbRoof);
     yeongamCircuitGroup.add(kartBldg);
 
-    // 9. High-Mast Circuit Floodlight Towers around Main Straight, Paddock & Marina (InstancedMesh + Emissive Night Glow)
+    // -------------------------------------------------------------------------
+    // 9. High-Mast Stadium Floodlight Towers & Landscaped Circuit Perimeter Trees
+    // -------------------------------------------------------------------------
     const lightTowerCoords = [
       [34.7364, 126.4114], [34.7372, 126.4139], [34.7380, 126.4165], [34.7389, 126.4192],
       [34.7399, 126.4198], [34.7429, 126.4060], [34.7423, 126.4040], [34.7382, 126.4148],
       [34.7351, 126.4232], [34.7316, 126.4235], [34.7305, 126.4192], [34.7320, 126.4079]
     ];
-    const mastPoleGeo = new THREE.CylinderGeometry(0.025, 0.048, 1.55, 6);
-    const mastHeadGeo = new THREE.BoxGeometry(0.26, 0.10, 0.08);
+    const mastPoleGeo = new THREE.CylinderGeometry(0.026, 0.050, 1.68, 6);
+    const mastHeadGeo = new THREE.BoxGeometry(0.30, 0.11, 0.09);
     const floodLightMat = new THREE.MeshStandardMaterial({
       color: 0xfefce8,
       emissive: 0xfef08a,
-      emissiveIntensity: 0.32,
-      roughness: 0.25
+      emissiveIntensity: 0.34,
+      roughness: 0.24
     });
-    yeongamEmissiveMaterials.push({ mat: floodLightMat, dayInt: 0.28, nightInt: 2.35 });
+    yeongamEmissiveMaterials.push({ mat: floodLightMat, dayInt: 0.30, nightInt: 2.40 });
 
     const mastPoles = new THREE.InstancedMesh(mastPoleGeo, silverArmcoMat, lightTowerCoords.length);
     const mastHeads = new THREE.InstancedMesh(mastHeadGeo, floodLightMat, lightTowerCoords.length);
     lightTowerCoords.forEach(([lLat, lLng], idx) => {
       const lp = worldPosition(lLat, lLng);
       const ly = surfaceHeight(lLat, lLng);
-      _dummy.position.set(lp.x, ly + 0.78, lp.z);
+      _dummy.position.set(lp.x, ly + 0.84, lp.z);
       _dummy.rotation.set(0, idx * 0.52, 0);
       _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix();
       mastPoles.setMatrixAt(idx, _dummy.matrix);
 
-      _dummy.position.set(lp.x, ly + 1.56, lp.z);
+      _dummy.position.set(lp.x, ly + 1.68, lp.z);
       _dummy.rotation.set(0.32, idx * 0.52, 0);
       _dummy.updateMatrix();
       mastHeads.setMatrixAt(idx, _dummy.matrix);
     });
     mastPoles.instanceMatrix.needsUpdate = true;
     mastHeads.instanceMatrix.needsUpdate = true;
+    mastPoles.frustumCulled = false;
+    mastHeads.frustumCulled = false;
     yeongamCircuitGroup.add(mastPoles, mastHeads);
 
-    // 10. Yeongamho Waterfront Yacht Marina (Floating Pontoons + Composite Superyachts & Sailboats at true water level!)
+    // Landscaped Spectator Berm & F1-ro Boulevard Trees (InstancedMesh with per-instance scale & tint!)
+    const treeCoords = [
+      // Northern hillside spectator berm above 1.2km Back Straight
+      [34.7442, 126.4072], [34.7445, 126.4090], [34.7447, 126.4108], [34.7445, 126.4126],
+      [34.7442, 126.4144], [34.7438, 126.4162], [34.7432, 126.4180], [34.7450, 126.4116],
+      [34.7452, 126.4096], [34.7448, 126.4136],
+      // Grandstand rear plaza & F1-ro entrance greenery
+      [34.7396, 126.4130], [34.7399, 126.4144], [34.7402, 126.4158], [34.7390, 126.4118],
+      [34.7384, 126.4108], [34.7418, 126.4222], [34.7408, 126.4232], [34.7392, 126.4236],
+      [34.7374, 126.4244], [34.7356, 126.4252],
+      // Marina promenade & West Karting greenbelt
+      [34.7294, 126.4185], [34.7295, 126.4165], [34.7296, 126.4144], [34.7298, 126.4122],
+      [34.7355, 126.4026], [34.7340, 126.4022], [34.7322, 126.4025], [34.7414, 126.4024]
+    ];
+    const trunkGeo = new THREE.CylinderGeometry(0.032, 0.048, 0.32, 6);
+    const crownGeo = new THREE.DodecahedronGeometry(0.24, 0);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.90, metalness: 0.02 });
+    const foliageMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.86, metalness: 0.02, flatShading: true });
+    const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCoords.length);
+    const crownInst = new THREE.InstancedMesh(crownGeo, foliageMat, treeCoords.length);
+    const foliagePalette = [0x2d6a3e, 0x357a47, 0x245834, 0x3f8448];
+    const _tCol = new THREE.Color();
+
+    treeCoords.forEach(([tLat, tLng], idx) => {
+      const tp = worldPosition(tLat, tLng);
+      const ty = surfaceHeight(tLat, tLng);
+      const s = 0.95 + ((idx * 37) % 10) * 0.042;
+      _dummy.position.set(tp.x, ty + 0.16 * s, tp.z);
+      _dummy.rotation.set(0, idx * 1.1, 0);
+      _dummy.scale.set(s, s, s);
+      _dummy.updateMatrix();
+      trunkInst.setMatrixAt(idx, _dummy.matrix);
+
+      _dummy.position.set(tp.x, ty + 0.40 * s, tp.z);
+      _dummy.scale.set(s * 1.08, s * 0.94, s * 1.08);
+      _dummy.updateMatrix();
+      crownInst.setMatrixAt(idx, _dummy.matrix);
+      _tCol.setHex(foliagePalette[idx % foliagePalette.length]);
+      crownInst.setColorAt(idx, _tCol);
+    });
+    trunkInst.instanceMatrix.needsUpdate = true;
+    crownInst.instanceMatrix.needsUpdate = true;
+    if (crownInst.instanceColor) crownInst.instanceColor.needsUpdate = true;
+    trunkInst.frustumCulled = false;
+    crownInst.frustumCulled = false;
+    yeongamCircuitGroup.add(trunkInst, crownInst);
+
+    // -------------------------------------------------------------------------
+    // 10. Yeongamho Waterfront Yacht Marina (Floating Pontoons + Composite Superyachts)
+    // -------------------------------------------------------------------------
     const oceanY = getOceanSurfaceY();
     const woodMat = new THREE.MeshStandardMaterial({ color: 0xa47551, roughness: 0.74, metalness: 0.06 });
     const hullMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.26, metalness: 0.14 });
@@ -5040,7 +6011,6 @@
       boat.position.set(yp.x, oceanY + 0.05, yp.z);
       boat.rotation.y = yCfg.rotY;
 
-      // Sculpted hull + pointed bow + teak aft deck
       const hull = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.13, 0.78), hullMat);
       hull.position.y = 0.04;
       hull.castShadow = true;
@@ -5058,7 +6028,6 @@
       boat.add(stripe);
 
       if (yCfg.type === 'motor') {
-        // Luxury Motor Superyacht Flybridge & Radar Arch
         const salon = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.11, 0.44), glassMat);
         salon.position.set(0, 0.15, 0.02);
         boat.add(salon);
@@ -5066,7 +6035,6 @@
         flybridge.position.set(0, 0.23, -0.04);
         boat.add(flybridge);
       } else {
-        // Racing Sailboat Cabin, Mast & Twin Sails
         const deckHouse = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.07, 0.32), glassMat);
         deckHouse.position.set(0, 0.12, 0.02);
         boat.add(deckHouse);
@@ -5081,27 +6049,27 @@
       yeongamCircuitGroup.add(boat);
     });
 
-    // 11. 6 Multi-Part Aerodynamic GT3 / Sports Prototype Race Cars with Contact Shadows
+    // -------------------------------------------------------------------------
+    // 11. 8 Composite Open-Wheel F1 & GT3 Championship Race Cars with Dynamic Braking Glow
+    // -------------------------------------------------------------------------
     const carConfigs = [
-      { color: 0xdc2626, accent: 0xf8fafc, phase: 0.02, speed: 0.030 }, // Scuderia / KIC Crimson GT3
-      { color: 0x2563eb, accent: 0xfacc15, phase: 0.14, speed: 0.029 }, // Works Cobalt Prototype
-      { color: 0xf59e0b, accent: 0x111827, phase: 0.31, speed: 0.032 }, // Papaya / Solar Amber GT
-      { color: 0x10b981, accent: 0xfef08a, phase: 0.51, speed: 0.028 }, // British / AMR Emerald GT3
-      { color: 0x38bdf8, accent: 0xef4444, phase: 0.69, speed: 0.031 }, // N-Performance Performance Blue
-      { color: 0xf8fafc, accent: 0xdc2626, phase: 0.86, speed: 0.030 }  // Weissach White Cup GT3
+      { kind: 'f1',  color: 0xdc2626, accent: 0xfacc15, phase: 0.015, speed: 0.034 }, // Scuderia Rosso F1
+      { kind: 'f1',  color: 0x1e3a8a, accent: 0xf59e0b, phase: 0.085, speed: 0.035 }, // Championship Navy F1
+      { kind: 'f1',  color: 0xf97316, accent: 0x0f172a, phase: 0.240, speed: 0.034 }, // Papaya Aero F1
+      { kind: 'f1',  color: 0x0f766e, accent: 0x99f6e4, phase: 0.390, speed: 0.033 }, // Silver-Teal Works F1
+      { kind: 'gt3', color: 0x38bdf8, accent: 0xef4444, phase: 0.540, speed: 0.030 }, // N-Performance Blue GT3
+      { kind: 'gt3', color: 0x10b981, accent: 0xfef08a, phase: 0.675, speed: 0.029 }, // AMR Emerald GT3
+      { kind: 'gt3', color: 0xf8fafc, accent: 0xdc2626, phase: 0.805, speed: 0.030 }, // Weissach White Cup GT3
+      { kind: 'gt3', color: 0xfacc15, accent: 0x111827, phase: 0.925, speed: 0.031 }  // Solar Yellow Endurance GT3
     ];
 
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.85, metalness: 0.08 });
-    const carbonMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.45, metalness: 0.35 });
-    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.14, metalness: 0.72 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.86, metalness: 0.08 });
+    const carbonMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.42, metalness: 0.38 });
+    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.12, metalness: 0.72 });
     const headLightMat = new THREE.MeshStandardMaterial({ color: 0xfef9c3, emissive: 0xfef08a, emissiveIntensity: 1.25 });
-    const tailLightMat = new THREE.MeshStandardMaterial({ color: 0xff2b2b, emissive: 0xef4444, emissiveIntensity: 1.35 });
-    yeongamEmissiveMaterials.push(
-      { mat: headLightMat, dayInt: 1.1, nightInt: 2.6 },
-      { mat: tailLightMat, dayInt: 1.2, nightInt: 2.6 }
-    );
+    yeongamEmissiveMaterials.push({ mat: headLightMat, dayInt: 1.1, nightInt: 2.6 });
 
-    const contactShadowGeo = new THREE.PlaneGeometry(0.62, 1.24);
+    const contactShadowGeo = new THREE.PlaneGeometry(0.64, 1.32);
     contactShadowGeo.rotateX(-Math.PI / 2);
     const contactShadowMat = new THREE.MeshBasicMaterial({
       color: 0x090d14,
@@ -5112,73 +6080,131 @@
       polygonOffsetFactor: -3
     });
 
-    const wheelGeo = new THREE.CylinderGeometry(0.078, 0.078, 0.085, 10);
+    const wheelGeo = new THREE.CylinderGeometry(0.082, 0.082, 0.095, 10);
     wheelGeo.rotateZ(Math.PI / 2);
 
     carConfigs.forEach((cfg) => {
       const car = new THREE.Group();
-      const bodyMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.24, metalness: 0.46 });
-      const stripeMat = new THREE.MeshStandardMaterial({ color: cfg.accent, roughness: 0.32, metalness: 0.25 });
+      const bodyMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.20, metalness: 0.50 });
+      const stripeMat = new THREE.MeshStandardMaterial({ color: cfg.accent, roughness: 0.30, metalness: 0.25 });
+      const brakeTailMat = new THREE.MeshStandardMaterial({
+        color: 0xff2b2b,
+        emissive: 0xef4444,
+        emissiveIntensity: 0.85,
+        roughness: 0.20
+      });
 
-      // Ground contact shadow plane
       const shadowDisc = new THREE.Mesh(contactShadowGeo, contactShadowMat);
       shadowDisc.position.y = 0.012;
       car.add(shadowDisc);
 
-      // Front carbon aero splitter + rear diffuser
-      const splitter = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.028, 1.12), carbonMat);
-      splitter.position.y = 0.048;
-      car.add(splitter);
+      if (cfg.kind === 'f1') {
+        // Composite Open-Wheel Formula 1 Car (10 parts: floor, tapered nosecone, sidepods, Halo, airbox, front & DRS rear wings, 4 exposed slicks)
+        const floor = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.025, 1.06), carbonMat);
+        floor.position.y = 0.045;
+        car.add(floor);
 
-      // Sculpted widebody GT3 lower chassis + central livery racing stripe
-      const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 1.04), bodyMat);
-      chassis.position.y = 0.11;
-      chassis.castShadow = true;
-      car.add(chassis);
+        const nose = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.72), bodyMat);
+        nose.position.set(0, 0.10, 0.22);
+        nose.castShadow = true;
+        car.add(nose);
 
-      const liveryStripe = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.126, 1.045), stripeMat);
-      liveryStripe.position.y = 0.112;
-      car.add(liveryStripe);
+        const frontWing = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.024, 0.14), stripeMat);
+        frontWing.position.set(0, 0.055, 0.56);
+        car.add(frontWing);
 
-      // Teardrop dark cockpit greenhouse + shark-fin intake
-      const canopyGlass = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.11, 0.44), cabinMat);
-      canopyGlass.position.set(0, 0.20, -0.02);
-      car.add(canopyGlass);
+        const sidepods = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.11, 0.54), bodyMat);
+        sidepods.position.set(0, 0.11, -0.06);
+        sidepods.castShadow = true;
+        car.add(sidepods);
 
-      const sharkFin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.09, 0.28), carbonMat);
-      sharkFin.position.set(0, 0.22, -0.28);
-      car.add(sharkFin);
+        const engineCover = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.44), bodyMat);
+        engineCover.position.set(0, 0.19, -0.18);
+        car.add(engineCover);
 
-      // Swan-neck carbon GT Rear Wing + twin endplates
-      const rearWing = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.028, 0.13), carbonMat);
-      rearWing.position.set(0, 0.27, -0.47);
-      car.add(rearWing);
-      [-0.25, 0.25].forEach((epX) => {
-        const endplate = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, 0.15), stripeMat);
-        endplate.position.set(epX, 0.26, -0.47);
-        car.add(endplate);
-      });
+        const halo = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.22), carbonMat);
+        halo.position.set(0, 0.18, 0.06);
+        car.add(halo);
 
-      // Endurance LED headlights + full-width crimson LED tail-bar
-      [-0.15, 0.15].forEach((hlX) => {
-        const hl = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.04, 0.04), headLightMat);
-        hl.position.set(hlX, 0.11, 0.52);
-        car.add(hl);
-      });
-      const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.038, 0.04), tailLightMat);
-      taillight.position.set(0, 0.13, -0.52);
-      car.add(taillight);
+        const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), stripeMat);
+        helmet.position.set(0, 0.18, 0.01);
+        car.add(helmet);
 
-      [
-        [-0.23, 0.078, 0.33],
-        [0.23, 0.078, 0.33],
-        [-0.23, 0.078, -0.33],
-        [0.23, 0.078, -0.33]
-      ].forEach(([wx, wy, wz]) => {
-        const wheel = new THREE.Mesh(wheelGeo, tireMat);
-        wheel.position.set(wx, wy, wz);
-        car.add(wheel);
-      });
+        const rearWing = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.032, 0.14), carbonMat);
+        rearWing.position.set(0, 0.27, -0.50);
+        car.add(rearWing);
+        [-0.21, 0.21].forEach((epX) => {
+          const ep = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.11, 0.16), stripeMat);
+          ep.position.set(epX, 0.24, -0.50);
+          car.add(ep);
+        });
+
+        const rainLight = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.04), brakeTailMat);
+        rainLight.position.set(0, 0.12, -0.55);
+        car.add(rainLight);
+
+        [
+          [-0.26, 0.082, 0.36],
+          [0.26, 0.082, 0.36],
+          [-0.27, 0.082, -0.34],
+          [0.27, 0.082, -0.34]
+        ].forEach(([wx, wy, wz]) => {
+          const wheel = new THREE.Mesh(wheelGeo, tireMat);
+          wheel.position.set(wx, wy, wz);
+          car.add(wheel);
+        });
+      } else {
+        // Composite Widebody GT3 Endurance Supercar
+        const splitter = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.028, 1.12), carbonMat);
+        splitter.position.y = 0.048;
+        car.add(splitter);
+
+        const chassis = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 1.04), bodyMat);
+        chassis.position.y = 0.11;
+        chassis.castShadow = true;
+        car.add(chassis);
+
+        const liveryStripe = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.126, 1.045), stripeMat);
+        liveryStripe.position.y = 0.112;
+        car.add(liveryStripe);
+
+        const canopyGlass = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.11, 0.44), cabinMat);
+        canopyGlass.position.set(0, 0.20, -0.02);
+        car.add(canopyGlass);
+
+        const sharkFin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.09, 0.28), carbonMat);
+        sharkFin.position.set(0, 0.22, -0.28);
+        car.add(sharkFin);
+
+        const rearWing = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.028, 0.13), carbonMat);
+        rearWing.position.set(0, 0.27, -0.47);
+        car.add(rearWing);
+        [-0.25, 0.25].forEach((epX) => {
+          const endplate = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.09, 0.15), stripeMat);
+          endplate.position.set(epX, 0.26, -0.47);
+          car.add(endplate);
+        });
+
+        [-0.15, 0.15].forEach((hlX) => {
+          const hl = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.04, 0.04), headLightMat);
+          hl.position.set(hlX, 0.11, 0.52);
+          car.add(hl);
+        });
+        const taillight = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.038, 0.04), brakeTailMat);
+        taillight.position.set(0, 0.13, -0.52);
+        car.add(taillight);
+
+        [
+          [-0.23, 0.082, 0.33],
+          [0.23, 0.082, 0.33],
+          [-0.23, 0.082, -0.33],
+          [0.23, 0.082, -0.33]
+        ].forEach(([wx, wy, wz]) => {
+          const wheel = new THREE.Mesh(wheelGeo, tireMat);
+          wheel.position.set(wx, wy, wz);
+          car.add(wheel);
+        });
+      }
 
       yeongamTrackCurve.getPointAt(cfg.phase, _carPos);
       yeongamTrackCurve.getPointAt((cfg.phase + 0.008) % 1, _carNextPos);
@@ -5186,7 +6212,7 @@
       car.lookAt(_carNextPos.x, _carNextPos.y + 0.025, _carNextPos.z);
 
       yeongamCircuitGroup.add(car);
-      yeongamAnimCars.push({ mesh: car, phase: cfg.phase, speed: cfg.speed, speedProfile });
+      yeongamAnimCars.push({ mesh: car, phase: cfg.phase, speed: cfg.speed, speedProfile, brakeTailMat });
     });
 
     scene.add(yeongamCircuitGroup);
@@ -8453,6 +9479,9 @@
           yeongamTrackCurve.getPointAt((car.phase + 0.008) % 1, _carNextPos);
           car.mesh.position.set(_carPos.x, _carPos.y + 0.025, _carPos.z);
           car.mesh.lookAt(_carNextPos.x, _carNextPos.y + 0.025, _carNextPos.z);
+          if (car.brakeTailMat) {
+            car.brakeTailMat.emissiveIntensity = cornerMult < 0.86 ? 2.65 : 0.75;
+          }
         }
       }
       if (!droneMode) controls.update();
